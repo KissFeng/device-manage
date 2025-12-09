@@ -1,0 +1,557 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>设备管理 - 光影资产</title>
+    <link rel="icon" type="image/png" href="../static/logo.png">
+    <link rel="stylesheet" href="../css/common.css">
+    <link rel="stylesheet" href="../css/layout.css">
+</head>
+<body>
+    <script src="../js/api.js?v=2"></script>
+    <script src="../js/auth.js"></script>
+    <script src="../js/layout.js"></script>
+    <script>
+        // 等待 DOM 加载完成
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', initPage);
+        } else {
+            initPage();
+        }
+        
+        function initPage() {
+            if (!requireAuth('ADMIN')) {
+                return;
+            }
+            
+            const { content } = createLayout([
+            { href: '/admin/dashboard.html', text: '仪表盘', active: false, icon: '<rect x="3" y="3" width="7" height="7"></rect><rect x="14" y="3" width="7" height="7"></rect><rect x="14" y="14" width="7" height="7"></rect><rect x="3" y="14" width="7" height="7"></rect>' },
+            { href: '/user/devices.html', text: '设备浏览', active: false, icon: '<path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path><polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline><line x1="12" y1="22.08" x2="12" y2="12"></line>' },
+            { href: '/admin/devices.html', text: '设备管理', active: true, icon: '<path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path>' },
+            { href: '/admin/categories.html', text: '分类管理', active: false, icon: '<rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><line x1="9" y1="3" x2="9" y2="21"></line>' },
+            { href: '/admin/users.html', text: '用户管理', active: false, icon: '<path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M23 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path>' },
+            { href: '/admin/borrow-approval.html', text: '借用审批', active: false, icon: '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line>' }
+        ]);
+        
+            // 等待内容移动到容器后再初始化
+            setTimeout(async () => {
+                await loadCategories();
+                await loadDevices();
+                
+                // 检查URL参数，是否要创建新设备
+                const urlParams = new URLSearchParams(window.location.search);
+                if (urlParams.get('action') === 'create') {
+                    openDeviceModal();
+                }
+                
+                // 搜索和筛选事件
+                const searchInput = document.getElementById('searchInput');
+                const categoryFilter = document.getElementById('categoryFilter');
+                const statusFilter = document.getElementById('statusFilter');
+                const addBtn = document.getElementById('addDeviceBtn');
+                
+                if (searchInput) {
+                    searchInput.addEventListener('input', debounce(function(e) {
+                        currentPage = 1;
+                        loadDevices();
+                    }, 300));
+                }
+                
+                if (categoryFilter) {
+                    categoryFilter.addEventListener('change', function() {
+                        currentPage = 1;
+                        loadDevices();
+                    });
+                }
+                
+                if (statusFilter) {
+                    statusFilter.addEventListener('change', function() {
+                        currentPage = 1;
+                        loadDevices();
+                    });
+                    // 更新状态筛选选项
+                    statusFilter.innerHTML = `
+                        <option value="">全部状态</option>
+                        <option value="NORMAL">正常</option>
+                        <option value="BORROWED">借用中</option>
+                        <option value="MAINTENANCE">维修中</option>
+                        <option value="SCRAPPED">已报废</option>
+                    `;
+                }
+                
+                if (addBtn) {
+                    addBtn.addEventListener('click', () => openDeviceModal());
+                }
+                
+                // 绑定设备编辑模态框关闭按钮
+                const closeBtn = document.getElementById('closeDeviceModalBtn');
+                const cancelBtn = document.getElementById('cancelDeviceBtn');
+                
+                if (closeBtn) {
+                    closeBtn.addEventListener('click', (e) => {
+                        e.preventDefault();
+                        closeDeviceModal();
+                    });
+                }
+                
+                if (cancelBtn) {
+                    cancelBtn.addEventListener('click', (e) => {
+                        e.preventDefault();
+                        closeDeviceModal();
+                    });
+                }
+            }, 200);
+        }
+        
+        // 全局变量声明（供函数使用）
+        let currentPage = 1;
+        let pageSize = 10;
+        let categories = [];
+        let editingDevice = null;
+        
+        async function loadCategories() {
+            try {
+                const response = await API.categories.list();
+                if (response.code === 200) {
+                    categories = response.data;
+                    const select = document.getElementById('categoryFilter');
+                    select.innerHTML = '<option value="">全部分类</option>';
+                    categories.forEach(cat => {
+                        const option = document.createElement('option');
+                        option.value = cat.id;
+                        option.textContent = cat.name;
+                        select.appendChild(option);
+                    });
+                }
+            } catch (error) {
+                console.error('加载分类失败:', error);
+            }
+        }
+        
+        async function loadDevices() {
+            const container = document.getElementById('devicesList');
+            showLoading(container);
+            
+            try {
+                const params = {
+                    page: currentPage,
+                    size: pageSize,
+                };
+                
+                const searchInput = document.getElementById('searchInput');
+                const categoryFilter = document.getElementById('categoryFilter');
+                const statusFilter = document.getElementById('statusFilter');
+                
+                if (searchInput) {
+                    const name = searchInput.value.trim();
+                    if (name) params.name = name;
+                }
+                
+                if (categoryFilter) {
+                    const categoryId = categoryFilter.value;
+                    if (categoryId) params.categoryId = categoryId;
+                }
+                
+                if (statusFilter) {
+                    const status = statusFilter.value;
+                    if (status) params.status = status;
+                }
+                
+                const response = await API.devices.list(params);
+                
+                if (response.code === 200) {
+                    const data = response.data;
+                    renderDevices(data.list, data.total);
+                } else {
+                    container.innerHTML = showEmptyState('加载失败，请重试');
+                }
+            } catch (error) {
+                container.innerHTML = showEmptyState('加载失败：' + error.message);
+            }
+        }
+        
+        function renderDevices(devices, total) {
+            const container = document.getElementById('devicesList');
+            
+            if (!devices || devices.length === 0) {
+                container.innerHTML = showEmptyState('暂无设备');
+                return;
+            }
+            
+            const totalPages = Math.ceil(total / pageSize);
+            
+            // 创建卡片容器
+            const card = document.createElement('div');
+            card.className = 'card';
+            
+            // 创建表格容器
+            const tableContainer = document.createElement('div');
+            tableContainer.className = 'table-container';
+            
+            // 创建表格
+            const table = document.createElement('table');
+            const thead = document.createElement('thead');
+            const tbody = document.createElement('tbody');
+            
+            // 表头
+            thead.innerHTML = `
+                <tr>
+                    <th>设备名称</th>
+                    <th>分类</th>
+                    <th>型号</th>
+                    <th>状态</th>
+                    <th>操作</th>
+                </tr>
+            `;
+            
+            // 表格内容
+            devices.forEach(device => {
+                // 根据 categoryId 查找分类名称
+                const category = categories.find(cat => cat.id === device.categoryId);
+                const categoryName = category ? category.name : (device.categoryName || '未分类');
+                
+                // 获取设备整体状态
+                const overallStatus = device.overallStatus || device.status || 'NORMAL';
+                
+                const tr = document.createElement('tr');
+                tr.innerHTML = `
+                    <td><strong>${device.name}</strong></td>
+                    <td>${categoryName}</td>
+                    <td>${device.model}</td>
+                    <td>
+                        <span class="badge status-${overallStatus.toLowerCase()}">
+                            ${getStatusText(overallStatus)}
+                        </span>
+                    </td>
+                    <td>
+                        <div style="display: flex; gap: var(--spacing-xs);">
+                            <button class="btn btn-sm btn-secondary" data-action="edit" data-id="${device.id}">编辑</button>
+                            <button class="btn btn-sm btn-danger" data-action="delete" data-id="${device.id}">删除</button>
+                        </div>
+                    </td>
+                `;
+                
+                // 添加事件监听器
+                const editBtn = tr.querySelector('[data-action="edit"]');
+                editBtn.addEventListener('click', () => editDevice(device.id));
+                
+                const deleteBtn = tr.querySelector('[data-action="delete"]');
+                deleteBtn.addEventListener('click', () => deleteDevice(device.id));
+                
+                tbody.appendChild(tr);
+            });
+            
+            table.appendChild(thead);
+            table.appendChild(tbody);
+            tableContainer.appendChild(table);
+            card.appendChild(tableContainer);
+            
+            // 添加分页
+            if (totalPages > 1) {
+                const pagination = createPagination(currentPage, totalPages, (page) => {
+                    currentPage = page;
+                    loadDevices();
+                    window.scrollTo({ top: 0, behavior: 'smooth' });
+                });
+                card.appendChild(pagination);
+            }
+            
+            container.innerHTML = '';
+            container.appendChild(card);
+        }
+        
+        function getStatusText(status) {
+            const statusMap = {
+                'NORMAL': '正常',
+                'MAINTENANCE': '维修中',
+                'SCRAPPED': '已报废'
+            };
+            return statusMap[status] || status;
+        }
+        
+        function openDeviceModal(device = null) {
+            const modal = document.getElementById('deviceModal');
+            const form = document.getElementById('deviceForm');
+            if (!modal || !form) return;
+            
+            form.reset();
+            
+            if (device) {
+                // 编辑模式：设置设备ID和所有字段值
+                document.getElementById('deviceId').value = device.id;
+                document.getElementById('deviceCategoryId').value = device.categoryId;
+                document.getElementById('deviceName').value = device.name;
+                document.getElementById('deviceModel').value = device.model;
+                document.getElementById('deviceDescription').value = device.description || '';
+                const modalTitle = document.querySelector('#deviceModal .modal-title');
+                if (modalTitle) {
+                    modalTitle.textContent = '编辑设备';
+                }
+            } else {
+                // 创建模式：清空设备ID
+                document.getElementById('deviceId').value = '';
+                const modalTitle = document.querySelector('#deviceModal .modal-title');
+                if (modalTitle) {
+                    modalTitle.textContent = '添加设备';
+                }
+            }
+            
+            // 确保关闭按钮已绑定事件
+            const closeBtn = document.getElementById('closeDeviceModalBtn');
+            const cancelBtn = document.getElementById('cancelDeviceBtn');
+            
+            // 移除旧的事件监听器（如果存在）
+            if (closeBtn) {
+                const newCloseBtn = closeBtn.cloneNode(true);
+                closeBtn.parentNode.replaceChild(newCloseBtn, closeBtn);
+                newCloseBtn.addEventListener('click', (e) => {
+                    e.preventDefault();
+                    closeDeviceModal();
+                });
+            }
+            
+            if (cancelBtn) {
+                const newCancelBtn = cancelBtn.cloneNode(true);
+                cancelBtn.parentNode.replaceChild(newCancelBtn, cancelBtn);
+                newCancelBtn.addEventListener('click', (e) => {
+                    e.preventDefault();
+                    closeDeviceModal();
+                });
+            }
+            
+            modal.classList.add('active');
+        }
+        
+        function closeDeviceModal() {
+            const modal = document.getElementById('deviceModal');
+            if (modal) {
+                modal.classList.remove('active');
+            }
+            // 清空设备ID，确保下次打开时是创建模式
+            const deviceIdInput = document.getElementById('deviceId');
+            if (deviceIdInput) {
+                deviceIdInput.value = '';
+            }
+        }
+        
+        async function editDevice(id) {
+            try {
+                const response = await API.devices.detail(id);
+                if (response.code === 200) {
+                    openDeviceModal(response.data);
+                }
+            } catch (error) {
+                alert('加载设备信息失败：' + error.message);
+            }
+        }
+        
+        // 注意：设备状态是根据设备实例自动计算的，不需要手动修改
+        
+        async function deleteDevice(id) {
+            if (!confirm('确定要删除此设备吗？')) {
+                return;
+            }
+            
+            try {
+                const response = await API.devices.delete(id);
+                if (response.code === 200) {
+                    loadDevices();
+                } else {
+                    alert(response.message || '删除失败');
+                }
+            } catch (error) {
+                alert('删除失败：' + error.message);
+            }
+        }
+        
+        // 绑定表单提交事件（在 setTimeout 内部，确保 DOM 元素已加载）
+        setTimeout(() => {
+            const deviceForm = document.getElementById('deviceForm');
+            if (deviceForm) {
+                // 移除旧的事件监听器（如果存在）
+                const newForm = deviceForm.cloneNode(true);
+                deviceForm.parentNode.replaceChild(newForm, deviceForm);
+                
+                newForm.addEventListener('submit', async function(e) {
+                    e.preventDefault();
+                    
+                    const formData = {
+                        categoryId: parseInt(document.getElementById('deviceCategoryId').value),
+                        name: document.getElementById('deviceName').value.trim(),
+                        model: document.getElementById('deviceModel').value.trim(),
+                        description: document.getElementById('deviceDescription').value.trim()
+                    };
+                    
+                    if (!formData.categoryId || !formData.name || !formData.model) {
+                        alert('请填写完整信息');
+                        return;
+                    }
+                    
+                    // 检查是否是编辑模式（通过 deviceId 字段判断）
+                    const deviceId = document.getElementById('deviceId').value;
+                    const isEditMode = !!deviceId;
+                    
+                    const submitBtn = document.querySelector('#deviceForm button[type="submit"]');
+                    const originalText = submitBtn.innerHTML;
+                    submitBtn.disabled = true;
+                    submitBtn.innerHTML = '<span class="loading"></span> 保存中...';
+                    
+                    try {
+                        let response;
+                        if (isEditMode) {
+                            response = await API.devices.update(parseInt(deviceId), formData);
+                        } else {
+                            response = await API.devices.create(formData);
+                        }
+                        
+                        if (response.code === 200) {
+                            alert(isEditMode ? '更新成功' : '创建成功');
+                            closeDeviceModal();
+                            loadDevices();
+                        } else {
+                            alert(response.message || '操作失败');
+                        }
+                    } catch (error) {
+                        alert('操作失败：' + error.message);
+                    } finally {
+                        submitBtn.disabled = false;
+                        submitBtn.innerHTML = originalText;
+                    }
+                });
+            }
+        }, 200);
+        
+        // 模态框关闭按钮事件（使用事件委托，支持点击按钮内的子元素）
+        document.addEventListener('click', function(e) {
+            // 检查点击的元素或其父元素是否是关闭按钮
+            if (e.target.id === 'closeDeviceModalBtn' || 
+                e.target.id === 'cancelDeviceBtn' ||
+                e.target.closest('#closeDeviceModalBtn') ||
+                e.target.closest('#cancelDeviceBtn')) {
+                e.preventDefault();
+                e.stopPropagation();
+                closeDeviceModal();
+                return false;
+            }
+            
+            // 点击模态框背景关闭
+            const modal = document.getElementById('deviceModal');
+            if (modal && e.target === modal) {
+                closeDeviceModal();
+            }
+        });
+        
+        function debounce(func, wait) {
+            let timeout;
+            return function executedFunction(...args) {
+                const later = () => {
+                    clearTimeout(timeout);
+                    func(...args);
+                };
+                clearTimeout(timeout);
+                timeout = setTimeout(later, wait);
+            };
+        }
+    </script>
+    
+    <div class="page-header">
+        <h1 class="page-title">设备管理</h1>
+        <p class="page-description">管理所有媒体设备信息</p>
+    </div>
+    
+    <div class="filter-bar" style="display: flex; align-items: center; justify-content: space-between; flex-wrap: nowrap;">
+        <div style="display: flex; align-items: center; gap: var(--spacing-md); flex-wrap: wrap; flex: 1;">
+            <div class="filter-group">
+                <label>搜索：</label>
+                <div class="search-box">
+                    <!-- <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <circle cx="11" cy="11" r="8"></circle>
+                        <path d="m21 21-4.35-4.35"></path>
+                    </svg> -->
+                    <input type="text" id="searchInput" placeholder="设备名称或型号">
+                </div>
+            </div>
+            <div class="filter-group">
+                <label>分类：</label>
+                <select id="categoryFilter">
+                    <option value="">全部分类</option>
+                </select>
+            </div>
+            <div class="filter-group">
+                <label>状态：</label>
+                <select id="statusFilter">
+                    <option value="">全部状态</option>
+                    <option value="NORMAL">正常</option>
+                    <option value="BORROWED">借用中</option>
+                    <option value="MAINTENANCE">维修中</option>
+                    <option value="SCRAPPED">已报废</option>
+                </select>
+            </div>
+        </div>
+        <div class="filter-group" style="margin-left: var(--spacing-lg); flex-shrink: 0;">
+            <button class="btn btn-primary" id="addDeviceBtn">
+                <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <line x1="12" y1="5" x2="12" y2="19"></line>
+                    <line x1="5" y1="12" x2="19" y2="12"></line>
+                </svg>
+                添加设备
+            </button>
+        </div>
+    </div>
+    
+    <div id="devicesList"></div>
+    
+    <!-- 设备编辑模态框 -->
+    <div class="modal" id="deviceModal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2 class="modal-title">添加设备</h2>
+                <button class="modal-close" id="closeDeviceModalBtn">×</button>
+            </div>
+            <form id="deviceForm">
+                <input type="hidden" id="deviceId">
+                <div class="form-group">
+                    <label>设备分类 *</label>
+                    <select id="deviceCategoryId" required>
+                        <option value="">请选择分类</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>设备名称 *</label>
+                    <input type="text" id="deviceName" required>
+                </div>
+                <div class="form-group">
+                    <label>型号 *</label>
+                    <input type="text" id="deviceModel" required>
+                </div>
+                <div class="form-group">
+                    <label>设备描述</label>
+                    <textarea id="deviceDescription" rows="3"></textarea>
+                </div>
+                <div style="display: flex; gap: var(--spacing-md); margin-top: var(--spacing-lg);">
+                    <button type="button" class="btn btn-secondary" style="flex: 1;" id="cancelDeviceBtn">取消</button>
+                    <button type="submit" class="btn btn-primary" style="flex: 1;">保存</button>
+                </div>
+            </form>
+        </div>
+    </div>
+    
+    <script>
+        // 加载分类到表单
+        document.addEventListener('DOMContentLoaded', function() {
+            setTimeout(() => {
+                const select = document.getElementById('deviceCategoryId');
+                categories.forEach(cat => {
+                    const option = document.createElement('option');
+                    option.value = cat.id;
+                    option.textContent = cat.name;
+                    select.appendChild(option);
+                });
+            }, 500);
+        });
+    </script>
+    
+</body>
+</html>
+

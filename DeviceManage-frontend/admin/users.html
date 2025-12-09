@@ -1,0 +1,504 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>用户管理 - 光影资产</title>
+    <link rel="icon" type="image/png" href="../static/logo.png">
+    <link rel="stylesheet" href="../css/common.css">
+    <link rel="stylesheet" href="../css/layout.css">
+</head>
+<body>
+    <script src="../js/api.js?v=2"></script>
+    <script src="../js/auth.js"></script>
+    <script src="../js/layout.js"></script>
+    <script>
+        // 等待 DOM 加载完成
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', initPage);
+        } else {
+            initPage();
+        }
+        
+        function initPage() {
+            if (!requireAuth('ADMIN')) {
+                return;
+            }
+            
+            // 获取当前用户信息，用于权限控制
+            const currentUser = getUserInfo();
+            window.currentUserRole = currentUser ? currentUser.role : null;
+            
+            const { content } = createLayout([
+            { href: '/admin/dashboard.html', text: '仪表盘', active: false, icon: '<rect x="3" y="3" width="7" height="7"></rect><rect x="14" y="3" width="7" height="7"></rect><rect x="14" y="14" width="7" height="7"></rect><rect x="3" y="14" width="7" height="7"></rect>' },
+            { href: '/user/devices.html', text: '设备浏览', active: false, icon: '<path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path><polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline><line x1="12" y1="22.08" x2="12" y2="12"></line>' },
+            { href: '/admin/devices.html', text: '设备管理', active: false, icon: '<path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path>' },
+            { href: '/admin/categories.html', text: '分类管理', active: false, icon: '<rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><line x1="9" y1="3" x2="9" y2="21"></line>' },
+            { href: '/admin/users.html', text: '用户管理', active: true, icon: '<path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M23 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path>' },
+            { href: '/admin/borrow-approval.html', text: '借用审批', active: false, icon: '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line>' }
+        ]);
+        
+            // 等待内容移动到容器后再初始化
+            setTimeout(async () => {
+                await initCurrentUserId();
+                await loadUsers();
+                
+                const urlParams = new URLSearchParams(window.location.search);
+                if (urlParams.get('action') === 'create') {
+                    openUserModal();
+                }
+                
+                const searchInput = document.getElementById('searchInput');
+                const roleFilter = document.getElementById('roleFilter');
+                
+                if (searchInput) {
+                    searchInput.addEventListener('input', debounce(function() {
+                        currentPage = 1;
+                        loadUsers();
+                    }, 300));
+                }
+                
+                if (roleFilter) {
+                    roleFilter.addEventListener('change', function() {
+                        currentPage = 1;
+                        loadUsers();
+                    });
+                }
+                
+                // 绑定按钮事件
+                const addBtn = document.getElementById('addUserBtn');
+                const closeBtn = document.getElementById('closeUserModalBtn');
+                const cancelBtn = document.getElementById('cancelUserBtn');
+                
+                if (addBtn) addBtn.addEventListener('click', () => openUserModal());
+                if (closeBtn) closeBtn.addEventListener('click', () => closeUserModal());
+                if (cancelBtn) cancelBtn.addEventListener('click', () => closeUserModal());
+                
+                // 绑定表单提交事件
+                const userForm = document.getElementById('userForm');
+                if (userForm) {
+                    userForm.addEventListener('submit', async function(e) {
+                        e.preventDefault();
+                        
+                        const formData = {
+                            username: document.getElementById('userUsername').value.trim(),
+                            realName: document.getElementById('userRealName').value.trim(),
+                            role: document.getElementById('userRole').value,
+                            status: document.getElementById('userStatus').value
+                        };
+                        
+                        const password = document.getElementById('userPassword').value;
+                        if (password) {
+                            formData.password = password;
+                        }
+                        
+                        if (!formData.username || !formData.realName) {
+                            alert('请填写完整信息');
+                            return;
+                        }
+                        
+                        // 检查是否是编辑模式（通过 userId 字段判断）
+                        const userId = document.getElementById('userId').value;
+                        const isEditMode = !!userId;
+                        
+                        if (!isEditMode && !password) {
+                            alert('创建用户时必须设置密码');
+                            return;
+                        }
+                        
+                        const submitBtn = document.querySelector('#userForm button[type="submit"]');
+                        if (!submitBtn) {
+                            alert('无法找到提交按钮');
+                            return;
+                        }
+                        const originalText = submitBtn.innerHTML;
+                        submitBtn.disabled = true;
+                        submitBtn.innerHTML = '<span class="loading"></span> 保存中...';
+                        
+                        try {
+                            let response;
+                            if (isEditMode) {
+                                response = await API.users.update(userId, formData);
+                            } else {
+                                response = await API.users.create(formData);
+                            }
+                            
+                            if (response.code === 200) {
+                                // alert(isEditMode ? '更新成功' : '创建成功');
+                                closeUserModal();
+                                loadUsers();
+                            } else {
+                                alert(response.message || '操作失败');
+                            }
+                        } catch (error) {
+                            alert('操作失败：' + (error.message || '未知错误'));
+                        } finally {
+                            if (submitBtn) {
+                                submitBtn.disabled = false;
+                                submitBtn.innerHTML = originalText;
+                            }
+                        }
+                    });
+                }
+            }, 200);
+        }
+        
+        // 全局变量和函数声明
+        let currentPage = 1;
+        let pageSize = 10;
+        let editingUser = null;
+        
+        // 获取当前用户ID
+        async function initCurrentUserId() {
+            try {
+                const response = await API.auth.getUserInfo();
+                if (response.code === 200) {
+                    window.currentUserId = response.data.id;
+                }
+            } catch (error) {
+                console.error('获取当前用户ID失败:', error);
+            }
+        }
+        
+        // 检查是否可以管理指定角色的用户
+        function canManageUser(targetRole) {
+            const currentRole = window.currentUserRole;
+            if (!currentRole || !targetRole) return false;
+            
+            // ROOT 可以管理所有角色
+            if (currentRole === 'ROOT') {
+                return true;
+            }
+            
+            // ADMIN 只能管理 USER
+            if (currentRole === 'ADMIN') {
+                return targetRole === 'USER';
+            }
+            
+            return false;
+        }
+        
+        async function loadUsers() {
+            const container = document.getElementById('usersList');
+            showLoading(container);
+            
+            try {
+                const params = {
+                    page: currentPage,
+                    size: pageSize,
+                };
+                
+                const searchInput = document.getElementById('searchInput');
+                const roleFilter = document.getElementById('roleFilter');
+                
+                if (searchInput) {
+                    const username = searchInput.value.trim();
+                    if (username) params.username = username;
+                }
+                
+                if (roleFilter) {
+                    const role = roleFilter.value;
+                    if (role) params.role = role;
+                }
+                
+                const response = await API.users.list(params);
+                
+                if (response.code === 200) {
+                    const data = response.data;
+                    renderUsers(data.list, data.total);
+                } else {
+                    container.innerHTML = showEmptyState('加载失败，请重试');
+                }
+            } catch (error) {
+                container.innerHTML = showEmptyState('加载失败：' + error.message);
+            }
+        }
+        
+        function renderUsers(users, total) {
+            const container = document.getElementById('usersList');
+            
+            if (!users || users.length === 0) {
+                container.innerHTML = showEmptyState('暂无用户');
+                return;
+            }
+            
+            const totalPages = Math.ceil(total / pageSize);
+            
+            // 创建卡片容器
+            const card = document.createElement('div');
+            card.className = 'card';
+            
+            // 创建表格容器
+            const tableContainer = document.createElement('div');
+            tableContainer.className = 'table-container';
+            
+            // 创建表格
+            const table = document.createElement('table');
+            const thead = document.createElement('thead');
+            const tbody = document.createElement('tbody');
+            
+            // 表头
+            thead.innerHTML = `
+                <tr>
+                    <th>用户名</th>
+                    <th>真实姓名</th>
+                    <th>角色</th>
+                    <th>状态</th>
+                    <th>创建时间</th>
+                    <th>操作</th>
+                </tr>
+            `;
+            
+            // 表格内容
+            users.forEach(user => {
+                const tr = document.createElement('tr');
+                tr.innerHTML = `
+                    <td><strong>${user.username}</strong></td>
+                    <td>${user.realName}</td>
+                    <td>
+                        <span class="badge ${user.role === 'ROOT' ? 'badge-danger' : user.role === 'ADMIN' ? 'badge-info' : 'badge-secondary'}">
+                            ${user.role === 'ROOT' ? '超级管理员' : user.role === 'ADMIN' ? '管理员' : '普通用户'}
+                        </span>
+                    </td>
+                    <td>
+                        <span class="badge ${user.status === 'ACTIVE' ? 'badge-success' : 'badge-danger'}">
+                            ${user.status === 'ACTIVE' ? '激活' : '禁用'}
+                        </span>
+                    </td>
+                    <td>${formatDateTime(user.createdAt)}</td>
+                    <td>
+                        <div style="display: flex; gap: var(--spacing-xs);">
+                            ${canManageUser(user.role) ? `
+                                <button class="btn btn-sm btn-secondary" data-action="edit" data-id="${user.id}">编辑</button>
+                                ${user.id !== (window.currentUserId || 0) ? `<button class="btn btn-sm btn-danger" data-action="delete" data-id="${user.id}">删除</button>` : ''}
+                            ` : '<span style="color: #999; font-size: 12px;">无权限</span>'}
+                        </div>
+                    </td>
+                `;
+                
+                // 添加事件监听器（检查按钮是否存在）
+                const editBtn = tr.querySelector('[data-action="edit"]');
+                if (editBtn) {
+                    editBtn.addEventListener('click', () => editUser(user.id));
+                }
+                
+                const deleteBtn = tr.querySelector('[data-action="delete"]');
+                if (deleteBtn) {
+                    deleteBtn.addEventListener('click', () => deleteUser(user.id));
+                }
+                
+                tbody.appendChild(tr);
+            });
+            
+            table.appendChild(thead);
+            table.appendChild(tbody);
+            tableContainer.appendChild(table);
+            card.appendChild(tableContainer);
+            
+            // 添加分页
+            if (totalPages > 1) {
+                const pagination = createPagination(currentPage, totalPages, (page) => {
+                    currentPage = page;
+                    loadUsers();
+                    window.scrollTo({ top: 0, behavior: 'smooth' });
+                });
+                card.appendChild(pagination);
+            }
+            
+            container.innerHTML = '';
+            container.appendChild(card);
+        }
+        
+        function formatDateTime(dateTime) {
+            if (!dateTime) return '-';
+            return new Date(dateTime).toLocaleString('zh-CN');
+        }
+        
+        function openUserModal(user = null) {
+            editingUser = user;
+            const modal = document.getElementById('userModal');
+            const form = document.getElementById('userForm');
+            const passwordInput = document.getElementById('userPassword');
+            const passwordGroup = passwordInput.parentElement;
+            const roleSelect = document.getElementById('userRole');
+            
+            form.reset();
+            
+            // 根据当前用户角色，限制可选择的角色选项
+            const currentRole = window.currentUserRole;
+            if (currentRole === 'ROOT') {
+                // ROOT 可以选择所有角色
+                roleSelect.innerHTML = `
+                    <option value="USER">普通用户</option>
+                    <option value="ADMIN">管理员</option>
+                    <option value="ROOT">超级管理员</option>
+                `;
+            } else if (currentRole === 'ADMIN') {
+                // ADMIN 只能选择 USER
+                roleSelect.innerHTML = `
+                    <option value="USER">普通用户</option>
+                `;
+            }
+            
+            if (user) {
+                // 编辑模式：隐藏密码字段并移除 required 属性
+                passwordGroup.style.display = 'none';
+                passwordInput.removeAttribute('required');
+                document.getElementById('userId').value = user.id;
+                document.getElementById('userUsername').value = user.username;
+                document.getElementById('userRealName').value = user.realName;
+                document.getElementById('userRole').value = user.role;
+                document.getElementById('userStatus').value = user.status;
+                document.querySelector('.modal-title').textContent = '编辑用户';
+                
+                // 如果是 ADMIN 编辑，禁用角色选择
+                if (currentRole === 'ADMIN' && user.role !== 'USER') {
+                    roleSelect.disabled = true;
+                } else {
+                    roleSelect.disabled = false;
+                }
+            } else {
+                // 添加模式：显示密码字段并添加 required 属性
+                passwordGroup.style.display = 'block';
+                passwordInput.setAttribute('required', 'required');
+                document.querySelector('.modal-title').textContent = '添加用户';
+                roleSelect.disabled = false;
+            }
+            
+            modal.classList.add('active');
+        }
+        
+        function closeUserModal() {
+            document.getElementById('userModal').classList.remove('active');
+            editingUser = null;
+        }
+        
+        async function editUser(id) {
+            try {
+                const response = await API.users.detail(id);
+                if (response.code === 200) {
+                    openUserModal(response.data);
+                }
+            } catch (error) {
+                alert('加载用户信息失败：' + error.message);
+            }
+        }
+        
+        async function deleteUser(id) {
+            if (!confirm('确定要删除此用户吗？')) {
+                return;
+            }
+            
+            try {
+                const response = await API.users.delete(id);
+                if (response.code === 200) {
+                    // alert('删除成功');
+                    loadUsers();
+                } else {
+                    alert(response.message || '删除失败');
+                }
+            } catch (error) {
+                alert('删除失败：' + error.message);
+            }
+        }
+        
+        
+        function debounce(func, wait) {
+            let timeout;
+            return function executedFunction(...args) {
+                const later = () => {
+                    clearTimeout(timeout);
+                    func(...args);
+                };
+                clearTimeout(timeout);
+                timeout = setTimeout(later, wait);
+            };
+        }
+    </script>
+    
+    <div class="page-header">
+        <h1 class="page-title">用户管理</h1>
+        <p class="page-description">管理系统用户和权限</p>
+    </div>
+    
+    <div class="filter-bar" style="display: flex; align-items: center; justify-content: space-between; flex-wrap: nowrap;">
+        <div style="display: flex; align-items: center; gap: var(--spacing-md); flex-wrap: wrap; flex: 1;">
+            <div class="filter-group">
+                <label>搜索：</label>
+                <div class="search-box">
+                    <!-- <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <circle cx="11" cy="11" r="8"></circle>
+                        <path d="m21 21-4.35-4.35"></path>
+                    </svg> -->
+                    <input type="text" id="searchInput" placeholder="用户名">
+                </div>
+            </div>
+            <div class="filter-group">
+                <label>角色：</label>
+                <select id="roleFilter">
+                    <option value="">全部角色</option>
+                    <option value="ROOT">超级管理员</option>
+                    <option value="ADMIN">管理员</option>
+                    <option value="USER">普通用户</option>
+                </select>
+            </div>
+        </div>
+        <div class="filter-group" style="margin-left: var(--spacing-lg); flex-shrink: 0;">
+            <button class="btn btn-primary" id="addUserBtn">
+                <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <line x1="12" y1="5" x2="12" y2="19"></line>
+                    <line x1="5" y1="12" x2="19" y2="12"></line>
+                </svg>
+                添加用户
+            </button>
+        </div>
+    </div>
+    
+    <div id="usersList"></div>
+    
+    <!-- 用户编辑模态框 -->
+    <div class="modal" id="userModal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2 class="modal-title">添加用户</h2>
+                <button class="modal-close" id="closeUserModalBtn">×</button>
+            </div>
+            <form id="userForm">
+                <input type="hidden" id="userId">
+                <div class="form-group">
+                    <label>用户名 *</label>
+                    <input type="text" id="userUsername" required>
+                </div>
+                <div class="form-group" id="passwordGroup">
+                    <label>密码 *</label>
+                    <input type="password" id="userPassword" required>
+                </div>
+                <div class="form-group">
+                    <label>真实姓名 *</label>
+                    <input type="text" id="userRealName" required>
+                </div>
+                <div class="form-group">
+                    <label>角色 *</label>
+                    <select id="userRole" required>
+                        <option value="USER">普通用户</option>
+                        <option value="ADMIN">管理员</option>
+                        <option value="ROOT">超级管理员</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>状态 *</label>
+                    <select id="userStatus" required>
+                        <option value="ACTIVE">激活</option>
+                        <option value="INACTIVE">禁用</option>
+                    </select>
+                </div>
+                <div style="display: flex; gap: var(--spacing-md); margin-top: var(--spacing-lg);">
+                    <button type="button" class="btn btn-secondary" style="flex: 1;" id="cancelUserBtn">取消</button>
+                    <button type="submit" class="btn btn-primary" style="flex: 1;">保存</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</body>
+</html>
+

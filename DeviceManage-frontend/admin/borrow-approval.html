@@ -1,0 +1,392 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>借用审批 - 光影资产</title>
+    <link rel="icon" type="image/png" href="../static/logo.png">
+    <link rel="stylesheet" href="../css/common.css">
+    <link rel="stylesheet" href="../css/layout.css">
+</head>
+<body>
+    <script src="../js/api.js?v=2"></script>
+    <script src="../js/auth.js"></script>
+    <script src="../js/layout.js"></script>
+    <script>
+        // 等待 DOM 加载完成
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', initPage);
+        } else {
+            initPage();
+        }
+        
+        function initPage() {
+            if (!requireAuth('ADMIN')) {
+                return;
+            }
+            
+            const { content } = createLayout([
+            { href: '/admin/dashboard.html', text: '仪表盘', active: false, icon: '<rect x="3" y="3" width="7" height="7"></rect><rect x="14" y="3" width="7" height="7"></rect><rect x="14" y="14" width="7" height="7"></rect><rect x="3" y="14" width="7" height="7"></rect>' },
+            { href: '/user/devices.html', text: '设备浏览', active: false, icon: '<path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path><polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline><line x1="12" y1="22.08" x2="12" y2="12"></line>' },
+            { href: '/admin/devices.html', text: '设备管理', active: false, icon: '<path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path>' },
+            { href: '/admin/categories.html', text: '分类管理', active: false, icon: '<rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><line x1="9" y1="3" x2="9" y2="21"></line>' },
+            { href: '/admin/users.html', text: '用户管理', active: false, icon: '<path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M23 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path>' },
+            { href: '/admin/borrow-approval.html', text: '借用审批', active: true, icon: '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line>' }
+        ]);
+        
+            // 等待内容移动到容器后再初始化
+            setTimeout(() => {
+                // 确保容器存在
+                const container = document.getElementById('recordsList');
+                if (!container) {
+                    console.error('找不到 recordsList 容器，延迟重试...');
+                    setTimeout(() => {
+                        const retryContainer = document.getElementById('recordsList');
+                        if (retryContainer) {
+                            loadPendingRecords();
+                            updateTabs();
+                            bindTabEvents();
+                        }
+                    }, 200);
+                    return;
+                }
+                
+                // 初始化标签页状态
+                updateTabs();
+                
+                // 加载数据
+                loadPendingRecords();
+                
+                // 绑定标签页切换事件
+                bindTabEvents();
+            }, 300);
+        }
+        
+        function bindTabEvents() {
+            const tabPending = document.getElementById('tabPending');
+            const tabAll = document.getElementById('tabAll');
+            
+            if (tabPending) {
+                // 移除旧的事件监听器（如果存在）
+                const newTabPending = tabPending.cloneNode(true);
+                tabPending.parentNode.replaceChild(newTabPending, tabPending);
+                newTabPending.addEventListener('click', function() {
+                    currentTab = 'pending';
+                    updateTabs();
+                    currentPage = 1;
+                    loadPendingRecords();
+                });
+            }
+            
+            if (tabAll) {
+                // 移除旧的事件监听器（如果存在）
+                const newTabAll = tabAll.cloneNode(true);
+                tabAll.parentNode.replaceChild(newTabAll, tabAll);
+                newTabAll.addEventListener('click', function() {
+                    currentTab = 'all';
+                    updateTabs();
+                    currentPage = 1;
+                    loadAllRecords();
+                });
+            }
+        }
+        
+        // 全局变量和函数声明
+        let currentPage = 1;
+        let pageSize = 10;
+        let currentTab = 'pending'; // pending, all
+        
+        function updateTabs() {
+            const tabPending = document.getElementById('tabPending');
+            const tabAll = document.getElementById('tabAll');
+            if (tabPending) tabPending.classList.toggle('active', currentTab === 'pending');
+            if (tabAll) tabAll.classList.toggle('active', currentTab === 'all');
+        }
+        
+        // DOMContentLoaded 事件处理已移到 setTimeout 中
+        
+        async function loadPendingRecords() {
+            const container = document.getElementById('recordsList');
+            if (!container) {
+                console.error('找不到 recordsList 容器');
+                return;
+            }
+            
+            showLoading(container);
+            
+            try {
+                const params = {
+                    page: currentPage,
+                    size: pageSize,
+                };
+                
+                const response = await API.borrowAdmin.pending(params);
+                
+                if (response.code === 200) {
+                    const data = response.data;
+                    renderRecords(data.list, data.total, true);
+                } else {
+                    container.innerHTML = showEmptyState('加载失败，请重试');
+                }
+            } catch (error) {
+                console.error('加载待审批记录失败:', error);
+                container.innerHTML = showEmptyState('加载失败：' + error.message);
+            }
+        }
+        
+        async function loadAllRecords() {
+            const container = document.getElementById('recordsList');
+            if (!container) {
+                console.error('找不到 recordsList 容器');
+                return;
+            }
+            
+            showLoading(container);
+            
+            try {
+                const params = {
+                    page: currentPage,
+                    size: pageSize,
+                };
+                
+                const response = await API.borrowAdmin.records(params);
+                
+                if (response.code === 200) {
+                    const data = response.data;
+                    renderRecords(data.list, data.total, false);
+                } else {
+                    container.innerHTML = showEmptyState('加载失败，请重试');
+                }
+            } catch (error) {
+                console.error('加载全部记录失败:', error);
+                container.innerHTML = showEmptyState('加载失败：' + error.message);
+            }
+        }
+        
+        function renderRecords(records, total, isPending) {
+            const container = document.getElementById('recordsList');
+            if (!container) {
+                console.error('找不到 recordsList 容器');
+                return;
+            }
+            
+            if (!records || records.length === 0) {
+                container.innerHTML = showEmptyState(isPending ? '暂无待审批申请' : '暂无借用记录');
+                return;
+            }
+            
+            const totalPages = Math.ceil(total / pageSize);
+            
+            // 创建卡片容器
+            const card = document.createElement('div');
+            card.className = 'card';
+            
+            // 创建表格容器
+            const tableContainer = document.createElement('div');
+            tableContainer.className = 'table-container';
+            
+            // 创建表格
+            const table = document.createElement('table');
+            const thead = document.createElement('thead');
+            const tbody = document.createElement('tbody');
+            
+            // 表头
+            thead.innerHTML = `
+                <tr>
+                    <th>申请人</th>
+                    <th>设备名称</th>
+                    <th>借用目的</th>
+                    <th>预计归还</th>
+                    <th>申请时间</th>
+                    <th>状态</th>
+                    <th>操作</th>
+                </tr>
+            `;
+            
+            // 表格内容
+            records.forEach(record => {
+                const tr = document.createElement('tr');
+                tr.innerHTML = `
+                    <td>
+                        <div>
+                            <strong>${record.realName || record.username}</strong>
+                            <div style="font-size: var(--font-size-xs); color: var(--text-tertiary);">${record.username}</div>
+                        </div>
+                    </td>
+                    <td>
+                        <div>
+                            <strong>${record.deviceName}</strong>
+                            ${record.deviceModel ? `<div style="font-size: var(--font-size-xs); color: var(--text-tertiary);">${record.deviceModel}</div>` : ''}
+                        </div>
+                    </td>
+                    <td>${record.purpose}</td>
+                    <td>${record.expectedReturnDate || '-'}</td>
+                    <td>${formatDateTime(record.createdAt)}</td>
+                    <td>
+                        <span class="badge status-${record.status.toLowerCase()}">
+                            ${getStatusText(record.status)}
+                        </span>
+                    </td>
+                    <td>
+                        ${record.status === 'PENDING' ? `
+                            <div style="display: flex; gap: var(--spacing-xs);">
+                                <button class="btn btn-sm btn-success" data-action="approve" data-id="${record.id}" data-approve="true">批准</button>
+                                <button class="btn btn-sm btn-danger" data-action="approve" data-id="${record.id}" data-approve="false">拒绝</button>
+                            </div>
+                        ` : record.status === 'APPROVED' ? `
+                            <button class="btn btn-sm btn-primary" data-action="return" data-id="${record.id}">确认归还</button>
+                        ` : '-'}
+                    </td>
+                `;
+                
+                // 添加事件监听器
+                const approveBtns = tr.querySelectorAll('[data-action="approve"]');
+                approveBtns.forEach(btn => {
+                    btn.addEventListener('click', () => {
+                        const approve = btn.getAttribute('data-approve') === 'true';
+                        approveRecord(record.id, approve);
+                    });
+                });
+                
+                const returnBtn = tr.querySelector('[data-action="return"]');
+                if (returnBtn) {
+                    returnBtn.addEventListener('click', () => returnRecord(record.id));
+                }
+                
+                tbody.appendChild(tr);
+            });
+            
+            table.appendChild(thead);
+            table.appendChild(tbody);
+            tableContainer.appendChild(table);
+            card.appendChild(tableContainer);
+            
+            // 添加分页
+            if (totalPages > 1) {
+                const pagination = createPagination(currentPage, totalPages, (page) => {
+                    currentPage = page;
+                    if (currentTab === 'pending') {
+                        loadPendingRecords();
+                    } else {
+                        loadAllRecords();
+                    }
+                    window.scrollTo({ top: 0, behavior: 'smooth' });
+                });
+                card.appendChild(pagination);
+            }
+            
+            container.innerHTML = '';
+            container.appendChild(card);
+        }
+        
+        function getStatusText(status) {
+            const statusMap = {
+                'PENDING': '待审批',
+                'APPROVED': '已批准',
+                'REJECTED': '已拒绝',
+                'RETURNED': '已归还'
+            };
+            return statusMap[status] || status;
+        }
+        
+        function formatDateTime(dateTime) {
+            if (!dateTime) return '-';
+            return new Date(dateTime).toLocaleString('zh-CN');
+        }
+        
+        async function approveRecord(id, approve) {
+            const action = approve ? '批准' : '拒绝';
+            let remark = '';
+            
+            if (approve) {
+                // 批准时，使用确认对话框
+                if (!confirm('确认批准该用户借用设备？')) {
+                    return; // 用户取消
+                }
+            } else {
+                // 拒绝时，使用确认对话框
+                if (!confirm('确认拒绝该借用审批？')) {
+                    return; // 用户取消
+                }
+            }
+            
+            try {
+                const response = await API.borrowAdmin.approve(id, {
+                    action: approve ? 'APPROVE' : 'REJECT',
+                    remark: remark
+                });
+                
+                if (response.code === 200) {
+                    if (currentTab === 'pending') {
+                        loadPendingRecords();
+                    } else {
+                        loadAllRecords();
+                    }
+                } else {
+                    alert(response.message || `${action}失败`);
+                }
+            } catch (error) {
+                alert(`${action}失败：` + error.message);
+            }
+        }
+        
+        async function returnRecord(id) {
+            // 使用确认对话框，不需要输入备注
+            if (!confirm('确认该用户是否归还？')) {
+                return; // 用户取消
+            }
+            
+            try {
+                const response = await API.borrowAdmin.return(id, {
+                    returnRemark: ''
+                });
+                
+                if (response.code === 200) {
+                    if (currentTab === 'pending') {
+                        loadPendingRecords();
+                    } else {
+                        loadAllRecords();
+                    }
+                } else {
+                    alert(response.message || '确认失败');
+                }
+            } catch (error) {
+                alert('确认失败：' + error.message);
+            }
+        }
+    </script>
+    
+    <div class="page-header">
+        <h1 class="page-title">借用审批</h1>
+        <p class="page-description">审批设备借用申请和管理归还</p>
+    </div>
+    
+    <div class="tabs" style="margin-bottom: var(--spacing-lg);">
+        <button id="tabPending" class="tab-btn active" style="padding: var(--spacing-md) var(--spacing-lg); border: none; background: var(--bg-primary); border-bottom: 2px solid var(--primary-color); color: var(--primary-color); font-weight: 500; cursor: pointer; border-radius: var(--border-radius);">
+            待审批
+        </button>
+        <button id="tabAll" class="tab-btn" style="padding: var(--spacing-md) var(--spacing-lg); border: none; background: var(--bg-primary); border-bottom: 2px solid transparent; color: var(--text-secondary); font-weight: 500; cursor: pointer; border-radius: var(--border-radius);">
+            全部记录
+        </button>
+    </div>
+    
+    <div id="recordsList"></div>
+    
+    <style>
+        .tabs {
+            display: flex;
+            gap: var(--spacing-sm);
+            border-bottom: 1px solid var(--border-color);
+        }
+        
+        .tab-btn {
+            border-radius: var(--border-radius) !important;
+        }
+        
+        .tab-btn:hover {
+            background-color: var(--bg-secondary) !important;
+        }
+    </style>
+</body>
+</html>
+

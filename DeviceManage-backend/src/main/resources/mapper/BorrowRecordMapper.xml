@@ -1,0 +1,129 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="chat.hbcit.devicemanagebackend.mapper.BorrowRecordMapper">
+
+    <select id="selectMyRecords" resultType="chat.hbcit.devicemanagebackend.vo.BorrowRecordVO">
+        SELECT br.id, br.user_id as userId, br.device_id as deviceId, br.device_instance_id as deviceInstanceId, 
+               br.quantity, br.purpose, 
+               br.expected_return_date as expectedReturnDate, br.actual_return_date as actualReturnDate, 
+               br.status, br.approve_user_id as approveUserId, br.approve_time as approveTime, 
+               br.approve_remark as approveRemark, br.return_remark as returnRemark, 
+               br.created_at as createdAt, br.updated_at as updatedAt,
+               d.name as deviceName, d.model as deviceModel,
+               di.instance_name as deviceInstanceName
+        FROM borrow_records br
+        LEFT JOIN devices d ON br.device_id = d.id
+        LEFT JOIN device_instances di ON br.device_instance_id = di.id
+        <where>
+            AND br.user_id = #{userId}
+            <if test="status != null and status != ''">
+                AND br.status = #{status}
+            </if>
+        </where>
+        ORDER BY br.created_at DESC
+        LIMIT #{offset}, #{size}
+    </select>
+
+    <select id="countMyRecords" resultType="java.lang.Long">
+        SELECT COUNT(*)
+        FROM borrow_records
+        <where>
+            AND user_id = #{userId}
+            <if test="status != null and status != ''">
+                AND status = #{status}
+            </if>
+        </where>
+    </select>
+
+    <select id="selectPendingRecords" resultType="chat.hbcit.devicemanagebackend.vo.BorrowRecordVO">
+        SELECT br.id, br.user_id as userId, br.device_id as deviceId, br.device_instance_id as deviceInstanceId, 
+               br.quantity, br.purpose, 
+               br.expected_return_date as expectedReturnDate, br.actual_return_date as actualReturnDate, 
+               br.status, br.approve_user_id as approveUserId, br.approve_time as approveTime, 
+               br.approve_remark as approveRemark, br.return_remark as returnRemark, 
+               br.created_at as createdAt, br.updated_at as updatedAt,
+               u.username, u.real_name as realName,
+               d.name as deviceName, d.model as deviceModel,
+               di.instance_name as deviceInstanceName
+        FROM borrow_records br
+        LEFT JOIN users u ON br.user_id = u.id
+        LEFT JOIN devices d ON br.device_id = d.id
+        LEFT JOIN device_instances di ON br.device_instance_id = di.id
+        <where>
+            AND br.status = 'PENDING'
+            <if test="deviceName != null and deviceName != ''">
+                AND d.name LIKE CONCAT('%', #{deviceName}, '%')
+            </if>
+            <if test="username != null and username != ''">
+                AND u.username LIKE CONCAT('%', #{username}, '%')
+            </if>
+        </where>
+        ORDER BY br.created_at DESC
+        LIMIT #{offset}, #{size}
+    </select>
+
+    <select id="countPendingRecords" resultType="java.lang.Long">
+        SELECT COUNT(*)
+        FROM borrow_records br
+        LEFT JOIN users u ON br.user_id = u.id
+        LEFT JOIN devices d ON br.device_id = d.id
+        <where>
+            AND br.status = 'PENDING'
+            <if test="deviceName != null and deviceName != ''">
+                AND d.name LIKE CONCAT('%', #{deviceName}, '%')
+            </if>
+            <if test="username != null and username != ''">
+                AND u.username LIKE CONCAT('%', #{username}, '%')
+            </if>
+        </where>
+    </select>
+
+    <select id="selectAllRecords" resultType="chat.hbcit.devicemanagebackend.vo.BorrowRecordVO">
+        SELECT br.id, br.user_id as userId, br.device_id as deviceId, br.device_instance_id as deviceInstanceId, 
+               br.quantity, br.purpose, 
+               br.expected_return_date as expectedReturnDate, br.actual_return_date as actualReturnDate, 
+               br.status, br.approve_user_id as approveUserId, br.approve_time as approveTime, 
+               br.approve_remark as approveRemark, br.return_remark as returnRemark, 
+               br.created_at as createdAt, br.updated_at as updatedAt,
+               u.username, u.real_name as realName,
+               d.name as deviceName, d.model as deviceModel,
+               di.instance_name as deviceInstanceName
+        FROM borrow_records br
+        LEFT JOIN users u ON br.user_id = u.id
+        LEFT JOIN devices d ON br.device_id = d.id
+        LEFT JOIN device_instances di ON br.device_instance_id = di.id
+        <where>
+            <if test="status != null and status != ''">
+                AND br.status = #{status}
+            </if>
+            <if test="deviceName != null and deviceName != ''">
+                AND d.name LIKE CONCAT('%', #{deviceName}, '%')
+            </if>
+            <if test="username != null and username != ''">
+                AND u.username LIKE CONCAT('%', #{username}, '%')
+            </if>
+        </where>
+        ORDER BY br.created_at DESC
+        LIMIT #{offset}, #{size}
+    </select>
+
+    <select id="countAllRecords" resultType="java.lang.Long">
+        SELECT COUNT(*)
+        FROM borrow_records br
+        LEFT JOIN users u ON br.user_id = u.id
+        LEFT JOIN devices d ON br.device_id = d.id
+        <where>
+            <if test="status != null and status != ''">
+                AND br.status = #{status}
+            </if>
+            <if test="deviceName != null and deviceName != ''">
+                AND d.name LIKE CONCAT('%', #{deviceName}, '%')
+            </if>
+            <if test="username != null and username != ''">
+                AND u.username LIKE CONCAT('%', #{username}, '%')
+            </if>
+        </where>
+    </select>
+
+</mapper>
+

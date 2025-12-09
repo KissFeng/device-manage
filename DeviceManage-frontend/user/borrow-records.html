@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>我的借用记录 - 光影资产</title>
+    <link rel="icon" type="image/png" href="../static/logo.png">
+    <link rel="stylesheet" href="../css/common.css">
+    <link rel="stylesheet" href="../css/layout.css">
+</head>
+<body>
+    <script src="../js/api.js?v=2"></script>
+    <script src="../js/auth.js"></script>
+    <script src="../js/layout.js"></script>
+    <script>
+        // 全局变量
+        let currentPage = 1;
+        let pageSize = 10;
+        let selectedStatus = '';
+        
+        // 加载借用记录
+        async function loadRecords() {
+            const container = document.getElementById('recordsList');
+            if (!container) return;
+            
+            showLoading(container);
+            
+            try {
+                const params = {
+                    page: currentPage,
+                    size: pageSize,
+                };
+                
+                if (selectedStatus) {
+                    params.status = selectedStatus;
+                }
+                
+                const response = await API.borrow.myRecords(params);
+                
+                if (response.code === 200) {
+                    const data = response.data;
+                    renderRecords(data.list, data.total);
+                } else {
+                    container.innerHTML = showEmptyState('加载失败，请重试');
+                }
+            } catch (error) {
+                container.innerHTML = showEmptyState('加载失败：' + error.message);
+            }
+        }
+        
+        // 渲染借用记录
+        function renderRecords(records, total) {
+            const container = document.getElementById('recordsList');
+            if (!container) return;
+            
+            if (!records || records.length === 0) {
+                container.innerHTML = showEmptyState('暂无借用记录');
+                return;
+            }
+            
+            const totalPages = Math.ceil(total / pageSize);
+            
+            // 创建卡片容器
+            const card = document.createElement('div');
+            card.className = 'card';
+            
+            // 创建表格容器
+            const tableContainer = document.createElement('div');
+            tableContainer.className = 'table-container';
+            
+            // 创建表格
+            const table = document.createElement('table');
+            const thead = document.createElement('thead');
+            const tbody = document.createElement('tbody');
+            
+            // 表头
+            thead.innerHTML = `
+                <tr>
+                    <th>设备名称</th>
+                    <th>型号</th>
+                    <th>借用目的</th>
+                    <th>预计归还</th>
+                    <th>实际归还</th>
+                    <th>状态</th>
+                    <th>申请时间</th>
+                </tr>
+            `;
+            
+            // 表格内容
+            records.forEach(record => {
+                const tr = document.createElement('tr');
+                tr.innerHTML = `
+                    <td><strong>${record.deviceName || '-'}</strong></td>
+                    <td>${record.deviceModel || '-'}</td>
+                    <td>${record.purpose || '-'}</td>
+                    <td>${record.expectedReturnDate || '-'}</td>
+                    <td>${record.actualReturnDate || '-'}</td>
+                    <td>
+                        <span class="badge status-${record.status.toLowerCase()}">
+                            ${getStatusText(record.status)}
+                        </span>
+                    </td>
+                    <td>${formatDateTime(record.createdAt)}</td>
+                `;
+                tbody.appendChild(tr);
+            });
+            
+            table.appendChild(thead);
+            table.appendChild(tbody);
+            tableContainer.appendChild(table);
+            card.appendChild(tableContainer);
+            
+            // 添加分页
+            if (totalPages > 1) {
+                const pagination = createPagination(currentPage, totalPages, (page) => {
+                    currentPage = page;
+                    loadRecords();
+                    window.scrollTo({ top: 0, behavior: 'smooth' });
+                });
+                card.appendChild(pagination);
+            }
+            
+            container.innerHTML = '';
+            container.appendChild(card);
+        }
+        
+        // 获取状态文本
+        function getStatusText(status) {
+            const statusMap = {
+                'PENDING': '待审批',
+                'APPROVED': '已批准',
+                'REJECTED': '已拒绝',
+                'RETURNED': '已归还'
+            };
+            return statusMap[status] || status;
+        }
+        
+        // 格式化日期时间
+        function formatDateTime(dateTime) {
+            if (!dateTime) return '-';
+            return new Date(dateTime).toLocaleString('zh-CN');
+        }
+        
+        // 初始化页面
+        function initPage() {
+            if (!requireAuth('USER')) {
+                return;
+            }
+            
+            const { content } = createLayout([
+                {
+                    href: '/user/devices.html',
+                    text: '设备浏览',
+                    active: false,
+                    icon: '<path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path><polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline><line x1="12" y1="22.08" x2="12" y2="12"></line>'
+                },
+                {
+                    href: '/user/borrow-records.html',
+                    text: '我的借用',
+                    active: true,
+                    icon: '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline>'
+                }
+            ]);
+            
+            // 等待内容移动到容器后再初始化
+            setTimeout(() => {
+                loadRecords();
+                
+                // 状态筛选事件
+                const statusFilter = document.getElementById('statusFilter');
+                if (statusFilter) {
+                    statusFilter.addEventListener('change', function(e) {
+                        selectedStatus = e.target.value;
+                        currentPage = 1;
+                        loadRecords();
+                    });
+                }
+            }, 300);
+        }
+        
+        // 等待 DOM 加载完成
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', initPage);
+        } else {
+            initPage();
+        }
+    </script>
+    
+    <div class="page-header">
+        <h1 class="page-title">我的借用记录</h1>
+        <p class="page-description">查看您的所有设备借用记录</p>
+    </div>
+    
+    <div class="filter-bar">
+        <div class="filter-group">
+            <label>状态筛选：</label>
+            <select id="statusFilter">
+                <option value="">全部状态</option>
+                <option value="PENDING">待审批</option>
+                <option value="APPROVED">已批准</option>
+                <option value="REJECTED">已拒绝</option>
+                <option value="RETURNED">已归还</option>
+            </select>
+        </div>
+    </div>
+    
+    <div id="recordsList"></div>
+</body>
+</html>
+
