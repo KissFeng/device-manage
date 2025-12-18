@@ -11,7 +11,7 @@
  Target Server Version : 80039 (8.0.39)
  File Encoding         : 65001
 
- Date: 10/12/2025 09:42:04
+ Date: 18/12/2025 16:31:45
 */
 
 SET NAMES utf8mb4;
@@ -62,7 +62,7 @@ INSERT INTO `borrow_records` VALUES (21, 2, 6, 4, 1, '1', '2025-12-12', NULL, 'R
 INSERT INTO `borrow_records` VALUES (22, 1, 2, 2, 1, '124', '2025-12-11', '2025-12-08', 'RETURNED', 1, '2025-12-08 18:28:51', '', '', '2025-12-08 18:28:40', '2025-12-08 18:28:40');
 INSERT INTO `borrow_records` VALUES (23, 1, 2, 2, 1, '123123123', '2025-12-10', '2025-12-08', 'RETURNED', 1, '2025-12-08 18:30:01', '', '', '2025-12-08 18:29:07', '2025-12-08 18:29:07');
 INSERT INTO `borrow_records` VALUES (24, 2, 2, 2, 1, '12312312', '2026-01-08', NULL, 'REJECTED', 1, '2025-12-08 20:42:27', '', NULL, '2025-12-08 18:31:21', '2025-12-08 18:31:21');
-INSERT INTO `borrow_records` VALUES (25, 1, 16, 14, 1, 'paizhao', '2025-12-12', NULL, 'APPROVED', 1, '2025-12-09 10:05:40', '', NULL, '2025-12-09 10:04:34', '2025-12-09 10:04:34');
+INSERT INTO `borrow_records` VALUES (25, 1, 16, 14, 1, 'paizhao', '2025-12-12', '2025-12-12', 'RETURNED', 1, '2025-12-09 10:05:40', '', '', '2025-12-09 10:04:34', '2025-12-09 10:04:34');
 
 -- ----------------------------
 -- Table structure for categories
@@ -190,13 +190,15 @@ CREATE TABLE `users`  (
   UNIQUE INDEX `uk_username`(`username` ASC) USING BTREE,
   INDEX `idx_role`(`role` ASC) USING BTREE,
   INDEX `idx_status`(`status` ASC) USING BTREE
-) ENGINE = InnoDB AUTO_INCREMENT = 11 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_unicode_ci COMMENT = '鐢ㄦ埛琛' ROW_FORMAT = DYNAMIC;
+) ENGINE = InnoDB AUTO_INCREMENT = 13 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_unicode_ci COMMENT = '鐢ㄦ埛琛' ROW_FORMAT = DYNAMIC;
 
 -- ----------------------------
 -- Records of users
 -- ----------------------------
-INSERT INTO `users` VALUES (1, 'root', '$2a$10$cPZGMzNQthunR0bPbP.r6O6NqEz12rsTn33dYsj6fdu40fCv2eKsW', '超级管理员', 'ROOT', 'ACTIVE', '2025-12-08 18:14:26', '2025-12-08 18:15:20');
-INSERT INTO `users` VALUES (2, 'admin', '$2a$10$b68xPCyu2uuxoo9tVV/XM.HB4vd5EksRJl2E8rTY8g.i7o3TnD3XW', '管理员', 'ADMIN', 'ACTIVE', '2025-12-08 10:02:18', '2025-12-08 18:15:02');
-INSERT INTO `users` VALUES (10, '赵杰', '$2a$10$Jp/jfpSbDMlv8rntg9WNzuBcN63TZI9Jexp02uCh1xWwN/sVlOPpW', '赵杰', 'USER', 'ACTIVE', '2025-12-08 20:41:43', '2025-12-08 20:41:43');
+INSERT INTO `users` VALUES (1, 'root', '$2a$10$cPZGMzNQthunR0bPbP.r6O6NqEz12rsTn33dYsj6fdu40fCv2eKsW', '超级管理员', 'ROOT', 'ACTIVE', '2025-12-18 18:14:26', '2025-12-18 16:29:34');
+INSERT INTO `users` VALUES (2, 'admin', '$2a$10$b68xPCyu2uuxoo9tVV/XM.HB4vd5EksRJl2E8rTY8g.i7o3TnD3XW', '管理员', 'ADMIN', 'ACTIVE', '2025-12-18 10:02:18', '2025-12-18 16:29:30');
+INSERT INTO `users` VALUES (10, '赵杰', '$2a$10$Jp/jfpSbDMlv8rntg9WNzuBcN63TZI9Jexp02uCh1xWwN/sVlOPpW', '赵杰', 'USER', 'ACTIVE', '2025-12-18 20:41:43', '2025-12-18 16:29:27');
+INSERT INTO `users` VALUES (11, '徐爱姣', '$2a$10$KqzXuWtM.9IvOElLJzV6futGErn2QtFmAgJHrGm4Hu91R3zASQNCm', '徐爱姣', 'ADMIN', 'ACTIVE', '2025-12-18 20:01:28', '2025-12-18 16:29:39');
+INSERT INTO `users` VALUES (12, 'user1', '$2a$10$C7C5W6XF49rRgszpAp9KEOK3Y4mrZgIXAW8sMOCSiI7jZBWk8loEy', 'user1', 'USER', 'ACTIVE', '2025-12-18 20:02:02', '2025-12-18 16:29:44');
 
 SET FOREIGN_KEY_CHECKS = 1;
