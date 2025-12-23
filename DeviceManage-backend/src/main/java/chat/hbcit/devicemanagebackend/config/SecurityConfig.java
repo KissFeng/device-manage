@@ -100,8 +100,9 @@ public class SecurityConfig {
         configuration.setExposedHeaders(Arrays.asList("*"));
         // 预检请求的有效期（秒）
         configuration.setMaxAge(3600L);
-        // 注意：使用通配符时不能设置 allowCredentials 为 true
-        // 如果需要携带凭证，需要明确指定允许的来源
+        // 允许携带凭证（Cookies、Authorization等）
+        configuration.setAllowCredentials(true);
+        // 注意：使用 setAllowedOriginPatterns("*") 可以与 setAllowCredentials(true) 共存
 
         UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
         source.registerCorsConfiguration("/**", configuration);
