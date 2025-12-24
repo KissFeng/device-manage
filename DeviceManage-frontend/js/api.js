@@ -3,11 +3,21 @@
  * 统一处理请求、响应和错误
  */
 
-// 后端API地址，根据实际情况修改
-// 开发环境使用 localhost，生产环境使用服务器IP
-const API_BASE_URL = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
-    ? 'http://localhost:9011'
-    : 'http://43.138.28.205:9011';
+// 后端API地址
+const API_BASE_URL = (function() {
+    const hostname = window.location.hostname;
+    // 如果是本地开发环境
+    if (hostname === 'localhost' || hostname === '127.0.0.1') {
+        return 'http://localhost:9011';
+    }
+    // 如果是HTTPS环境（生产环境反向代理），使用 /prod-api 前缀（需要Nginx配置转发）
+    // 或者如果你希望直接使用当前域名根路径转发，可以使用 window.location.origin
+    if (window.location.protocol === 'https:') {
+        return '/prod-api'; 
+    }
+    // 默认回退（HTTP IP访问）
+    return 'http://43.138.28.205:9011';
+})();
 
 /**
  * 获取Token

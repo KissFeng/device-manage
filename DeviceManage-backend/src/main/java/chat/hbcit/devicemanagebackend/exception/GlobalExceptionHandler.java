@@ -98,7 +98,7 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(Exception.class)
     public Result<?> handleException(Exception e) {
         logger.error("系统异常", e);
-        return Result.error(ResponseCode.INTERNAL_ERROR, "系统内部错误，请联系管理员");
+        return Result.error(ResponseCode.INTERNAL_ERROR, "系统内部错误: " + e.toString());
     }
 }
 
