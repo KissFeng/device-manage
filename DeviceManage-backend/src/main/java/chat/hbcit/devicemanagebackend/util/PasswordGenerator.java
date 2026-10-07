@@ -17,7 +17,7 @@ public class PasswordGenerator {
         BCryptPasswordEncoder encoder = new BCryptPasswordEncoder();
         
         // 生成123456的BCrypt加密值
-        String password = "zhaojie1";
+        String password = "123456";
         String encodedPassword = encoder.encode(password);
         
         System.out.println("============================================");
