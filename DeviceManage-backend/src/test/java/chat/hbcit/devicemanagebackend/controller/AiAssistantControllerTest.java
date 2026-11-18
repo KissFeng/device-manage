@@ -46,7 +46,8 @@ class AiAssistantControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value(200))
                 .andExpect(jsonPath("$.data", hasSize(4)))
-                .andExpect(jsonPath("$.data[1]", containsString("待审批")));
+                .andExpect(jsonPath("$.data[1]", containsString("管理员")))
+                .andExpect(jsonPath("$.data[2]", containsString("待审批")));
     }
 
     @Test

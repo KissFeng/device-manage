@@ -6,11 +6,16 @@ import chat.hbcit.devicemanagebackend.ai.tools.UserDeviceTools;
 import chat.hbcit.devicemanagebackend.dto.PageResult;
 import chat.hbcit.devicemanagebackend.entity.BorrowRecord;
 import chat.hbcit.devicemanagebackend.entity.Category;
+import chat.hbcit.devicemanagebackend.entity.DeviceInstance;
+import chat.hbcit.devicemanagebackend.entity.User;
+import chat.hbcit.devicemanagebackend.enums.BorrowStatus;
 import chat.hbcit.devicemanagebackend.enums.DeviceStatus;
 import chat.hbcit.devicemanagebackend.mapper.BorrowRecordMapper;
+import chat.hbcit.devicemanagebackend.mapper.DeviceInstanceMapper;
 import chat.hbcit.devicemanagebackend.scheduler.BorrowOverdueScheduler;
 import chat.hbcit.devicemanagebackend.service.BorrowService;
 import chat.hbcit.devicemanagebackend.service.CategoryService;
+import chat.hbcit.devicemanagebackend.service.DeviceInstanceService;
 import chat.hbcit.devicemanagebackend.service.DeviceService;
 import chat.hbcit.devicemanagebackend.service.UserService;
 import chat.hbcit.devicemanagebackend.vo.DeviceInstanceVO;
@@ -28,6 +33,8 @@ import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -52,7 +59,13 @@ class AiAssistantServiceTest {
     private UserService userService;
 
     @Mock
+    private DeviceInstanceService deviceInstanceService;
+
+    @Mock
     private BorrowRecordMapper borrowRecordMapper;
+
+    @Mock
+    private DeviceInstanceMapper deviceInstanceMapper;
 
     @Mock
     private BorrowOverdueScheduler overdueScheduler;
@@ -67,7 +80,7 @@ class AiAssistantServiceTest {
         assertThat(userSug).hasSize(4);
         assertThat(userSug.get(0)).contains("借用");
         assertThat(adminSug).hasSize(4);
-        assertThat(adminSug.get(1)).contains("待审批");
+        assertThat(adminSug.get(1)).contains("管理员");
     }
 
     @Test
@@ -86,7 +99,7 @@ class AiAssistantServiceTest {
     }
 
     @Test
-    void userDeviceToolsShouldQueryCategoriesAndAvailableDevicesWithStepEvents() {
+    void userDeviceToolsShouldQueryAndSubmitBorrowWithStepEvents() {
         List<AgentStepEvent> events = new ArrayList<>();
         UserDeviceTools tools = new UserDeviceTools(10L, categoryService, deviceServiceImpl, borrowService, events::add);
 
@@ -109,32 +122,59 @@ class AiAssistantServiceTest {
         when(deviceServiceImpl.getDeviceListWithInstances("Sony", null, null, null, 1, 50))
                 .thenReturn(new PageResult<>(1L, 1, 50, List.of(dev)));
 
+        BorrowRecord saved = new BorrowRecord();
+        saved.setId(88L);
+        saved.setDeviceId(5L);
+        saved.setDeviceInstanceId(101L);
+        saved.setStatus(BorrowStatus.PENDING.getCode());
+        saved.setExpectedReturnDate(LocalDate.now().plusDays(2));
+        when(borrowService.applyBorrow(eq(10L), any(BorrowRecord.class))).thenReturn(saved);
+
         List<Map<String, Object>> cats = tools.listDeviceCategories();
         List<Map<String, Object>> devs = tools.searchAvailableDevices("Sony", null);
+        Map<String, Object> applyRes = tools.submitBorrowApplication(
+                5L, LocalDate.now().plusDays(2).toString(), "宣传片拍摄");
 
         assertThat(cats).hasSize(1);
         assertThat(devs).hasSize(1);
-        assertThat(devs.get(0).get("availableCount")).isEqualTo(1L);
+        assertThat(applyRes.get("success")).isEqualTo(true);
+        assertThat(applyRes.get("recordId")).isEqualTo(88L);
         assertThat(events).extracting(AgentStepEvent::getStatus)
-                .containsExactly("running", "done", "running", "done");
+                .containsExactly("running", "done", "running", "done", "running", "done");
     }
 
     @Test
-    void adminInsightToolsShouldScanOverdueRecords() {
+    void adminInsightToolsShouldSupportUsersQueryApproveReturnAndInstanceStatus() {
         List<AgentStepEvent> events = new ArrayList<>();
         AdminInsightTools tools = new AdminInsightTools(
-                deviceService, categoryService, userService, borrowService,
-                borrowRecordMapper, overdueScheduler, events::add);
+                1L, deviceService, categoryService, userService, borrowService,
+                deviceInstanceService, borrowRecordMapper, deviceInstanceMapper,
+                overdueScheduler, events::add);
 
-        BorrowRecord overdue = new BorrowRecord();
-        overdue.setId(9L);
-        overdue.setExpectedReturnDate(LocalDate.now().minusDays(2));
-        when(borrowRecordMapper.selectList(any())).thenReturn(List.of(overdue));
+        User adminUser = new User();
+        adminUser.setId(2L);
+        adminUser.setUsername("admin");
+        adminUser.setRealName("管理员");
+        adminUser.setRole("ADMIN");
+        adminUser.setPassword("secret-hash");
+        when(userService.getUserList(null, "ADMIN", 1, 50))
+                .thenReturn(new PageResult<>(1L, 1, 50, List.of(adminUser)));
 
-        List<Map<String, Object>> list = tools.listOverdueBorrowRecords();
+        List<Map<String, Object>> admins = tools.listUsers(null, "ADMIN");
+        assertThat(admins).hasSize(1);
+        assertThat(admins.get(0)).doesNotContainKey("password");
+        assertThat(admins.get(0).get("username")).isEqualTo("admin");
 
-        assertThat(list).hasSize(1);
-        assertThat(events).hasSize(2);
-        assertThat(events.get(1).getTitle()).contains("1 条逾期记录");
+        Map<String, Object> approveRes = tools.approveBorrowApplication(12L, "APPROVE", "同意借出");
+        assertThat(approveRes.get("success")).isEqualTo(true);
+        verify(borrowService).approveBorrow(12L, 1L, "APPROVE", "同意借出");
+
+        Map<String, Object> returnRes = tools.confirmDeviceReturn(12L, "完好");
+        assertThat(returnRes.get("success")).isEqualTo(true);
+        verify(borrowService).confirmReturn(12L, "完好");
+
+        Map<String, Object> statusRes = tools.updateDeviceInstanceStatus(101L, "MAINTENANCE", "卡口检修");
+        assertThat(statusRes.get("success")).isEqualTo(true);
+        verify(deviceInstanceService).updateInstance(eq(101L), any(DeviceInstance.class));
     }
 }

@@ -2,6 +2,7 @@ package chat.hbcit.devicemanagebackend.ai.tools;
 
 import chat.hbcit.devicemanagebackend.ai.AgentStepEvent;
 import chat.hbcit.devicemanagebackend.dto.PageResult;
+import chat.hbcit.devicemanagebackend.entity.BorrowRecord;
 import chat.hbcit.devicemanagebackend.entity.Category;
 import chat.hbcit.devicemanagebackend.enums.DeviceStatus;
 import chat.hbcit.devicemanagebackend.service.BorrowService;
@@ -13,6 +14,7 @@ import chat.hbcit.devicemanagebackend.vo.DeviceVO;
 import org.springframework.ai.tool.annotation.Tool;
 import org.springframework.ai.tool.annotation.ToolParam;
 
+import java.time.LocalDate;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -154,5 +156,48 @@ public class UserDeviceTools {
                 String.format("已读取 我的借用记录（共 %d 条）", records.size()),
                 null, System.currentTimeMillis() - start));
         return records;
+    }
+
+    @Tool(description = "为当前登录用户提交一条设备借用申请（写操作：调用前须向用户确认设备ID、预计归还日期和借用目的）")
+    public Map<String, Object> submitBorrowApplication(
+            @ToolParam(description = "要借用的设备ID（可先通过 searchAvailableDevices 获取）") Long deviceId,
+            @ToolParam(description = "预计归还日期，格式 YYYY-MM-DD，必须晚于或等于今天") String expectedReturnDate,
+            @ToolParam(description = "借用目的说明，例如：社团宣传片拍摄") String purpose) {
+        String stepId = UUID.randomUUID().toString();
+        long start = System.currentTimeMillis();
+        AgentStepEvent.emit(stepEmitter, new AgentStepEvent(
+                stepId, "running", "tool",
+                String.format("正在提交 借用申请（设备ID: %d，预计归还: %s）", deviceId, expectedReturnDate),
+                null, null));
+
+        try {
+            BorrowRecord record = new BorrowRecord();
+            record.setDeviceId(deviceId);
+            record.setExpectedReturnDate(LocalDate.parse(expectedReturnDate.trim()));
+            record.setPurpose(purpose != null && !purpose.isBlank() ? purpose.trim() : "日常拍摄使用");
+            record.setQuantity(1);
+
+            BorrowRecord created = borrowService.applyBorrow(currentUserId, record);
+
+            Map<String, Object> res = new LinkedHashMap<>();
+            res.put("success", true);
+            res.put("recordId", created.getId());
+            res.put("deviceId", created.getDeviceId());
+            res.put("deviceInstanceId", created.getDeviceInstanceId());
+            res.put("status", created.getStatus());
+            res.put("expectedReturnDate", created.getExpectedReturnDate().toString());
+
+            AgentStepEvent.emit(stepEmitter, new AgentStepEvent(
+                    stepId, "done", "tool",
+                    String.format("已提交 借用申请（申请单 #%s，状态：%s）", created.getId(), created.getStatus()),
+                    null, System.currentTimeMillis() - start));
+            return res;
+        } catch (Exception ex) {
+            AgentStepEvent.emit(stepEmitter, new AgentStepEvent(
+                    stepId, "error", "alert",
+                    "提交借用申请失败：" + ex.getMessage(),
+                    null, System.currentTimeMillis() - start));
+            return Map.of("success", false, "message", ex.getMessage());
+        }
     }
 }

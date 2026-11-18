@@ -6,10 +6,12 @@ import chat.hbcit.devicemanagebackend.ai.tools.UserDeviceTools;
 import chat.hbcit.devicemanagebackend.dto.AiChatRequest;
 import chat.hbcit.devicemanagebackend.enums.UserRole;
 import chat.hbcit.devicemanagebackend.mapper.BorrowRecordMapper;
+import chat.hbcit.devicemanagebackend.mapper.DeviceInstanceMapper;
 import chat.hbcit.devicemanagebackend.scheduler.BorrowOverdueScheduler;
 import chat.hbcit.devicemanagebackend.service.AiAssistantService;
 import chat.hbcit.devicemanagebackend.service.BorrowService;
 import chat.hbcit.devicemanagebackend.service.CategoryService;
+import chat.hbcit.devicemanagebackend.service.DeviceInstanceService;
 import chat.hbcit.devicemanagebackend.service.UserService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -23,6 +25,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.io.IOException;
+import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -58,6 +61,12 @@ public class AiAssistantServiceImpl implements AiAssistantService {
     @Autowired
     private BorrowRecordMapper borrowRecordMapper;
 
+    @Autowired
+    private DeviceInstanceService deviceInstanceService;
+
+    @Autowired
+    private DeviceInstanceMapper deviceInstanceMapper;
+
     @Autowired(required = false)
     private BorrowOverdueScheduler overdueScheduler;
 
@@ -76,9 +85,9 @@ public class AiAssistantServiceImpl implements AiAssistantService {
         if (isAdminRole(role)) {
             return List.of(
                     "目前全库设备总数、待审批和逾期情况如何？",
+                    "帮我列出当前所有管理员和普通用户列表",
                     "帮我列出当前所有待审批的借用申请",
-                    "目前有哪些设备借用已经逾期未归还？",
-                    "当前各分类下有哪些可借用设备库存？"
+                    "目前有哪些设备借用已经逾期未归还？"
             );
         }
         return List.of(
@@ -142,8 +151,9 @@ public class AiAssistantServiceImpl implements AiAssistantService {
         UserDeviceTools userTools = new UserDeviceTools(userId, categoryService, deviceService, borrowService, stepEmitter);
         if (isAdminRole(role)) {
             AdminInsightTools adminTools = new AdminInsightTools(
-                    deviceService, categoryService, userService, borrowService,
-                    borrowRecordMapper, overdueScheduler, stepEmitter);
+                    userId, deviceService, categoryService, userService, borrowService,
+                    deviceInstanceService, borrowRecordMapper, deviceInstanceMapper,
+                    overdueScheduler, stepEmitter);
             return new Object[]{userTools, adminTools};
         }
         return new Object[]{userTools};
@@ -155,24 +165,29 @@ public class AiAssistantServiceImpl implements AiAssistantService {
     }
 
     private String buildSystemPrompt(String role) {
+        String today = LocalDate.now().toString();
         if (isAdminRole(role)) {
             return """
-                    你是“光影资产（DeviceManage）”平台的管理员运营分析智能助手。
-                    你的职责是帮助管理员快速查询平台资产统计、待审批申请、逾期借用风险和借用历史记录。
+                    你是“光影资产（DeviceManage）”平台的管理员运营分析与运维智能助手。今天日期是 %s。
+                    你的职责是帮助管理员查询资产统计、用户与管理员列表、待审批申请、逾期借用风险，并协助执行借用审批、归还核验与物理实例状态调整。
                     规则：
-                    1. 回答必须基于工具查询到的真实数据库数据，严禁编造数字或设备名称。
-                    2. 优先调用最匹配的工具获取实时数据，再使用清晰的中文 Markdown（要点列表或简洁表格）汇总呈现。
-                    3. 如发现逾期未归还或库存紧张情况，请在结尾给出简明的操作建议。
-                    """;
+                    1. 回答必须基于工具查询到的真实数据，严禁编造数字、用户或设备名称；查询用户列表时注意仅展示角色、账号等非敏感信息。
+                    2. 【Human-in-the-Loop 安全确认】对于审批通过/拒绝（approveBorrowApplication）、确认归还（confirmDeviceReturn）、修改物理实例状态（updateDeviceInstanceStatus）等写操作：
+                       - 先查询并向管理员复述即将操作的对象（如记录ID、申请人、设备、目标状态或动作），请管理员回复确认；
+                       - 待管理员明确确认（或指令中已带“直接确认执行”等明确授权且参数完整）后，再调用写工具落库并返回结果。
+                    3. 使用清晰的中文 Markdown（要点列表或简洁表格）汇总呈现结果。
+                    """.formatted(today);
         }
         return """
-                你是“光影资产（DeviceManage）”平台的器材借用顾问智能助手。
-                你的职责是帮助普通用户了解当前可借用的摄影/影视器材、可用库存数量，以及查询用户个人的借用审批进度。
+                你是“光影资产（DeviceManage）”平台的器材借用顾问智能助手。今天日期是 %s。
+                你的职责是帮助普通用户了解当前可借用器材与库存数量、查询个人借用审批进度，并协助用户提交借用申请。
                 规则：
                 1. 回答必须基于工具查询到的真实数据，严禁编造设备型号或可用数量。
-                2. 当用户询问“可以借什么”或某类器材时，先调用工具检索可借用设备及可用实例数量，再用清晰的中文 Markdown 列表/表格推荐。
-                3. 你仅拥有只读查询权限，如果用户想提交借用，请引导其在左侧“设备浏览”页面点击借用。
-                """;
+                2. 【Human-in-the-Loop 安全确认】当用户希望借用某台器材（submitBorrowApplication）时：
+                   - 先通过 searchAvailableDevices 确认设备ID与可用库存，并向用户复述“设备名称、预计归还日期（YYYY-MM-DD）、借用目的”，请用户确认；
+                   - 待用户回复确认（或用户已在同一句中明确给出完整日期、用途并要求直接提交）后，再调用 submitBorrowApplication 提交申请并返回单号。
+                3. 使用清晰的中文 Markdown 列表/表格推荐器材与注意事项。
+                """.formatted(today);
     }
 
     private List<Message> convertHistory(List<AiChatRequest.ChatMessageItem> history) {
