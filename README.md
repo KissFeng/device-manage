@@ -284,6 +284,16 @@ python3 -m http.server 8000
 
 ## 📋 综合实训构建与复核说明
 
+> **项目演进说明**：本项目在 **2025年12月《Java语言程序设计》课程实训** 基础之上进行二次开发与实质性架构重构。
+
+### 本次综合实训新增与重构内容
+1. **Redis 缓存与异常降级回源**：为设备分类查询接入 `StringRedisTemplate` 缓存（TTL 30 分钟），增删改时主动清除缓存，并在 Redis 不可用时捕获异常自动降级回源 MySQL。
+2. **`@Scheduled` 定时逾期巡检与 Actuator 监控**：新增 `BorrowOverdueScheduler` 每 5 分钟自动扫描逾期未归还借用记录并同步监控摘要（`/admin/borrow/overdue-summary`），同时暴露 `/actuator/health`、`/actuator/info`、`/actuator/metrics` 端点。
+3. **Spring AI 1.0.0 + DeepSeek 官方 API 智能体**：基于 `ChatClient` 与 `@Tool` 实现角色隔离的只读查询与 Human-in-the-Loop 确认式写操作（普通用户对话申请借用；管理员用户/管理员列表脱敏查询、对话审批、归还核验、实例状态切换），并结合 `SseEmitter` 与前端悬浮窗实现 Codex 风格执行轨迹、流式渐隐拖尾与同登录会话持久化。
+4. **SpringDoc OpenAPI 3 与离线接口文档**：接入 `springdoc-openapi-starter-webmvc-ui`，配置分组与 Bearer JWT 鉴权并导出离线 `接口文档.pdf`（共 35 个接口端点、34 个 Schema）。
+5. **自动化测试与 JaCoCo 覆盖率体系**：配置 `maven-surefire-plugin` 与 `jacoco-maven-plugin`，补充 Service 单元测试、定时任务测试与 MockMvc 接口安全测试，共 **60 个用例全部通过**，整体行覆盖率 **65.6%**（核心 `BorrowServiceImpl` 行覆盖率 **82.1%**、分支覆盖率 **87.5%**）。
+6. **配置脱敏与安全加固**：放行 `DispatcherType.ASYNC` 修复异步流二次分发拦截，支持数据库/JWT/DeepSeek 密钥环境变量注入并提供 `application-example.properties`。
+
 ### 1. 运行环境与依赖
 - **JDK**：17+
 - **数据库**：MySQL 8.0+（初始化脚本：`docs/device_manage.sql`）

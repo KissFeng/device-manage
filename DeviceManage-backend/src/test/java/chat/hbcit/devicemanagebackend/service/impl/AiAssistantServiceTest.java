@@ -18,6 +18,7 @@ import chat.hbcit.devicemanagebackend.service.CategoryService;
 import chat.hbcit.devicemanagebackend.service.DeviceInstanceService;
 import chat.hbcit.devicemanagebackend.service.DeviceService;
 import chat.hbcit.devicemanagebackend.service.UserService;
+import chat.hbcit.devicemanagebackend.vo.BorrowRecordVO;
 import chat.hbcit.devicemanagebackend.vo.DeviceInstanceVO;
 import chat.hbcit.devicemanagebackend.vo.DeviceVO;
 import org.junit.jupiter.api.Test;
@@ -176,5 +177,44 @@ class AiAssistantServiceTest {
         Map<String, Object> statusRes = tools.updateDeviceInstanceStatus(101L, "MAINTENANCE", "卡口检修");
         assertThat(statusRes.get("success")).isEqualTo(true);
         verify(deviceInstanceService).updateInstance(eq(101L), any(DeviceInstance.class));
+
+        // 覆盖 getSystemOverviewStats / listPendingBorrowApplications / queryBorrowRecords / searchDeviceInstances
+        when(deviceService.getDeviceList(null, null, null, null, 1, 1)).thenReturn(new PageResult<>(17L, 1, 1, List.of()));
+        when(categoryService.getAllCategories()).thenReturn(List.of(new Category()));
+        when(userService.getUserList(null, null, 1, 1)).thenReturn(new PageResult<>(5L, 1, 1, List.of()));
+        when(borrowService.getPendingRecords(null, null, 1, 1)).thenReturn(new PageResult<>(1L, 1, 1, List.of()));
+        when(borrowService.getAllRecords(BorrowStatus.APPROVED.getCode(), null, null, 1, 1)).thenReturn(new PageResult<>(2L, 1, 1, List.of()));
+        Map<String, Object> stats = tools.getSystemOverviewStats();
+        assertThat(stats.get("totalDevices")).isEqualTo(17L);
+
+        BorrowRecordVO vo = new BorrowRecordVO();
+        vo.setId(20L);
+        vo.setDeviceName("Sony A7M4");
+        vo.setUsername("user1");
+        when(borrowService.getPendingRecords(null, null, 1, 20)).thenReturn(new PageResult<>(1L, 1, 20, List.of(vo)));
+        when(borrowService.getAllRecords(null, null, null, 1, 20)).thenReturn(new PageResult<>(1L, 1, 20, List.of(vo)));
+        assertThat(tools.listPendingBorrowApplications(null, null)).hasSize(1);
+        assertThat(tools.queryBorrowRecords(null, null, null)).hasSize(1);
+
+        DeviceInstance inst = new DeviceInstance();
+        inst.setId(101L);
+        inst.setInstanceName("A7M4-001");
+        when(deviceInstanceMapper.selectList(any())).thenReturn(List.of(inst));
+        assertThat(tools.searchDeviceInstances("A7M4")).hasSize(1);
+    }
+
+    @Test
+    void userDeviceToolsShouldQueryMyBorrowRecords() {
+        List<AgentStepEvent> events = new ArrayList<>();
+        UserDeviceTools tools = new UserDeviceTools(10L, categoryService, deviceServiceImpl, borrowService, events::add);
+        BorrowRecordVO vo = new BorrowRecordVO();
+        vo.setId(30L);
+        vo.setDeviceName("佳能 EOS R5");
+        vo.setStatus("PENDING");
+        when(borrowService.getMyRecords(10L, null, 1, 20)).thenReturn(new PageResult<>(1L, 1, 20, List.of(vo)));
+
+        List<Map<String, Object>> records = tools.getMyBorrowRecords(null);
+        assertThat(records).hasSize(1);
+        assertThat(records.get(0).get("deviceName")).isEqualTo("佳能 EOS R5");
     }
 }
