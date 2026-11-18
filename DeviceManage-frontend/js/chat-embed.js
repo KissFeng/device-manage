@@ -1,6 +1,6 @@
 /**
  * 光影资产 AI 智能体悬浮窗组件（Spring AI + DeepSeek）
- * 仅在用户已登录后自动加载于页面右下角
+ * 支持角色感知工具调用、Codex 风格折叠思考轨迹、流式渐隐拖尾与会话持久化管理
  */
 (function () {
     const token = localStorage.getItem('token');
@@ -18,6 +18,10 @@
 
     const baseUrl = typeof API_BASE_URL !== 'undefined' ? API_BASE_URL : 'http://localhost:9011';
     const isAdmin = userInfo.role === 'ADMIN' || userInfo.role === 'ROOT';
+    const userKey = String(userInfo.id || userInfo.username || 'default');
+    const SESSIONS_KEY = `ai_sessions_${userKey}`;
+    const ACTIVE_KEY = `ai_active_session_${userKey}`;
+    const TOKEN_KEY = `ai_last_token_${userKey}`;
 
     // 动态注入样式表与 Logo 路径
     const isSubDir = window.location.pathname.includes('/admin/') || window.location.pathname.includes('/user/');
@@ -28,9 +32,74 @@
     linkEl.href = cssHref;
     document.head.appendChild(linkEl);
 
-    const history = [];
+    let sessions = [];
+    let activeSessionId = null;
     let isStreaming = false;
     let suggestions = [];
+
+    function loadSessionsFromStorage() {
+        try {
+            sessions = JSON.parse(localStorage.getItem(SESSIONS_KEY) || '[]');
+            if (!Array.isArray(sessions)) sessions = [];
+        } catch (e) {
+            sessions = [];
+        }
+
+        const lastToken = localStorage.getItem(TOKEN_KEY);
+        if (lastToken !== token) {
+            // 用户重新登录或切换账号：更新 token 并开启全新对话（历史仍保留在抽屉中）
+            localStorage.setItem(TOKEN_KEY, token);
+            const fresh = createEmptySession();
+            sessions.unshift(fresh);
+            activeSessionId = fresh.id;
+            saveSessions();
+        } else {
+            const savedActive = localStorage.getItem(ACTIVE_KEY);
+            const found = sessions.find(s => s.id === savedActive);
+            if (found) {
+                activeSessionId = found.id;
+            } else if (sessions.length > 0) {
+                activeSessionId = sessions[0].id;
+            } else {
+                const fresh = createEmptySession();
+                sessions.unshift(fresh);
+                activeSessionId = fresh.id;
+                saveSessions();
+            }
+        }
+    }
+
+    function createEmptySession() {
+        return {
+            id: 's_' + Date.now() + '_' + Math.random().toString(36).slice(2, 7),
+            title: '新对话',
+            updatedAt: Date.now(),
+            messages: []
+        };
+    }
+
+    function getActiveSession() {
+        let s = sessions.find(item => item.id === activeSessionId);
+        if (!s) {
+            s = createEmptySession();
+            sessions.unshift(s);
+            activeSessionId = s.id;
+        }
+        return s;
+    }
+
+    function saveSessions() {
+        try {
+            // 仅保留最近 30 条会话
+            if (sessions.length > 30) {
+                sessions = sessions.slice(0, 30);
+            }
+            localStorage.setItem(SESSIONS_KEY, JSON.stringify(sessions));
+            localStorage.setItem(ACTIVE_KEY, activeSessionId || '');
+        } catch (e) {
+            // 忽略存储配额异常
+        }
+    }
 
     function escapeHtml(str) {
         return String(str || '')
@@ -90,7 +159,6 @@
                 continue;
             }
 
-            // 标题 # ~ ####
             const headingMatch = line.match(/^(#{1,4})\s+(.+)$/);
             if (headingMatch) {
                 closeLists();
@@ -100,7 +168,6 @@
                 continue;
             }
 
-            // 分割线
             if (/^(-{3,}|\*{3,})$/.test(line)) {
                 closeLists();
                 closeTable();
@@ -108,7 +175,6 @@
                 continue;
             }
 
-            // 引用块 >
             if (line.startsWith('>')) {
                 closeLists();
                 closeTable();
@@ -116,7 +182,6 @@
                 continue;
             }
 
-            // Markdown 表格行
             if (line.startsWith('|') && line.endsWith('|')) {
                 closeLists();
                 const cells = line.slice(1, -1).split('|').map(c => c.trim());
@@ -155,7 +220,6 @@
         return html;
     }
 
-    // 为流式渲染的最后一个文本节点附加从实到虚的横向渐变拖尾
     function applyGradientTail(containerEl, tailLen = 14) {
         const walker = document.createTreeWalker(containerEl, NodeFilter.SHOW_TEXT, null);
         let lastTextNode = null;
@@ -199,16 +263,54 @@
     }
 
     function initWidget() {
+        loadSessionsFromStorage();
+
         const fab = document.createElement('button');
         fab.className = 'ai-fab';
         fab.title = '打开光影智助';
         fab.innerHTML = `<img src="${logoSrc}" alt="光影智助">`;
 
+        const userName = userInfo.realName || userInfo.username || '用户';
+        const userInitial = userName.charAt(0).toUpperCase();
+
         const panel = document.createElement('div');
         panel.className = 'ai-panel';
         panel.innerHTML = `
+            <div class="ai-drawer-backdrop" id="aiDrawerBackdrop"></div>
+            <aside class="ai-drawer" id="aiDrawer">
+                <div class="ai-drawer-header">
+                    <div class="ai-drawer-brand">
+                        <div class="ai-avatar-badge"><img src="${logoSrc}" alt="光影智助"></div>
+                        <span>光影智助</span>
+                    </div>
+                    <button class="ai-drawer-collapse-btn" id="aiDrawerCloseBtn" title="收起历史列表">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><polyline points="15 18 9 12 15 6"></polyline></svg>
+                    </button>
+                </div>
+                <div class="ai-drawer-new-wrap">
+                    <button class="ai-drawer-new-btn" id="aiDrawerNewBtn">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><circle cx="12" cy="12" r="9"></circle><line x1="12" y1="8" x2="12" y2="16"></line><line x1="8" y1="12" x2="16" y2="12"></line></svg>
+                        <span>新建对话</span>
+                    </button>
+                </div>
+                <div class="ai-drawer-section">
+                    <span>历史记录</span>
+                    <button class="ai-drawer-clear-btn" id="aiClearHistoryBtn" title="清空历史记录">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"></path><path d="M10 11v6"></path><path d="M14 11v6"></path></svg>
+                    </button>
+                </div>
+                <div class="ai-drawer-list" id="aiDrawerList"></div>
+                <div class="ai-drawer-footer">
+                    <div class="ai-drawer-user-dot">${escapeHtml(userInitial)}</div>
+                    <span>${escapeHtml(userName)}</span>
+                </div>
+            </aside>
+
             <div class="ai-header">
                 <div class="ai-header-left">
+                    <button class="ai-icon-btn" id="aiMenuBtn" title="历史对话记录">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="3" y1="6" x2="21" y2="6"></line><line x1="3" y1="12" x2="21" y2="12"></line><line x1="3" y1="18" x2="21" y2="18"></line></svg>
+                    </button>
                     <div class="ai-avatar-badge">
                         <img src="${logoSrc}" alt="光影智助">
                     </div>
@@ -246,11 +348,68 @@
         const messagesEl = panel.querySelector('#aiMessages');
         const inputEl = panel.querySelector('#aiInput');
         const sendBtn = panel.querySelector('#aiSendBtn');
+        const drawerEl = panel.querySelector('#aiDrawer');
+        const backdropEl = panel.querySelector('#aiDrawerBackdrop');
+        const drawerListEl = panel.querySelector('#aiDrawerList');
+
+        function toggleDrawer(open) {
+            if (open) {
+                renderDrawerList();
+                drawerEl.classList.add('open');
+                backdropEl.classList.add('open');
+            } else {
+                drawerEl.classList.remove('open');
+                backdropEl.classList.remove('open');
+            }
+        }
+
+        function renderDrawerList() {
+            const visibleSessions = sessions.filter(s => s.messages.length > 0 || s.id === activeSessionId);
+            if (visibleSessions.length === 0) {
+                drawerListEl.innerHTML = '<div class="ai-drawer-empty">暂无历史对话记录</div>';
+                return;
+            }
+            drawerListEl.innerHTML = visibleSessions.map(s => `
+                <div class="ai-session-item ${s.id === activeSessionId ? 'active' : ''}" data-id="${escapeHtml(s.id)}">
+                    <span class="ai-session-title" title="${escapeHtml(s.title)}">${escapeHtml(s.title)}</span>
+                    <button class="ai-session-del" data-del="${escapeHtml(s.id)}" title="删除对话">×</button>
+                </div>
+            `).join('');
+
+            drawerListEl.querySelectorAll('.ai-session-item').forEach(item => {
+                item.addEventListener('click', (e) => {
+                    if (e.target.closest('.ai-session-del') || isStreaming) return;
+                    activeSessionId = item.getAttribute('data-id');
+                    saveSessions();
+                    renderActiveSession();
+                    toggleDrawer(false);
+                });
+            });
+
+            drawerListEl.querySelectorAll('.ai-session-del').forEach(btn => {
+                btn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    if (isStreaming) return;
+                    const delId = btn.getAttribute('data-del');
+                    sessions = sessions.filter(s => s.id !== delId);
+                    if (sessions.length === 0) {
+                        const fresh = createEmptySession();
+                        sessions.unshift(fresh);
+                        activeSessionId = fresh.id;
+                    } else if (activeSessionId === delId) {
+                        activeSessionId = sessions[0].id;
+                    }
+                    saveSessions();
+                    renderDrawerList();
+                    renderActiveSession();
+                });
+            });
+        }
 
         function renderWelcome() {
             const greeting = isAdmin
-                ? `您好 <strong>${escapeHtml(userInfo.realName || userInfo.username)}</strong>，我是<strong>光影智助</strong>。我可以帮您实时查询全库设备库存、待审批申请与逾期借用情况。`
-                : `您好 <strong>${escapeHtml(userInfo.realName || userInfo.username)}</strong>，我是<strong>光影智助</strong>。您可以问我当前有哪些可借用器材、剩余可用数量，或查询您的借用审批进度。`;
+                ? `您好 <strong>${escapeHtml(userName)}</strong>，我是<strong>光影智助</strong>。我可以帮您实时查询全库设备库存、待审批申请与逾期借用情况。`
+                : `您好 <strong>${escapeHtml(userName)}</strong>，我是<strong>光影智助</strong>。您可以问我当前有哪些可借用器材、剩余可用数量，或查询您的借用审批进度。`;
 
             const sugHtml = suggestions.map(q => `
                 <button class="ai-suggestion-item" data-q="${escapeHtml(q)}">
@@ -272,6 +431,78 @@
             });
         }
 
+        function renderSavedMessage(msg) {
+            if (msg.role === 'user') {
+                const userRow = document.createElement('div');
+                userRow.className = 'ai-msg-row user';
+                userRow.innerHTML = `<div class="ai-user-bubble">${escapeHtml(msg.content)}</div>`;
+                messagesEl.appendChild(userRow);
+                return;
+            }
+            const aiRow = document.createElement('div');
+            aiRow.className = 'ai-msg-row assistant';
+            const steps = Array.isArray(msg.steps) ? msg.steps : [];
+            const summaryText = `已思考 · ${steps.length} 个步骤 (${msg.elapsedSec || '0.0'}s)`;
+            const stepsHtml = steps.map(step => `
+                <div class="codex-step-row ${step.status || 'done'}">
+                    <div class="codex-step-left">
+                        <span class="codex-step-icon">${stepIconSvg(step)}</span>
+                        <span class="codex-step-text" title="${escapeHtml(step.title)}">${escapeHtml(step.title)}</span>
+                    </div>
+                    <span class="codex-step-time">${step.durationMs != null ? step.durationMs + 'ms' : ''}</span>
+                </div>
+            `).join('');
+
+            aiRow.innerHTML = `
+                <div class="ai-assistant-wrap">
+                    <div class="codex-trace collapsed" style="${steps.length === 0 ? 'display:none;' : ''}">
+                        <button class="codex-trace-toggle" type="button">
+                            <span class="codex-status-text">${summaryText} ›</span>
+                        </button>
+                        <div class="codex-trace-list">${stepsHtml}</div>
+                    </div>
+                    <div class="ai-answer-body">${renderMarkdown(msg.content)}</div>
+                </div>
+            `;
+            const traceEl = aiRow.querySelector('.codex-trace');
+            const toggleBtn = aiRow.querySelector('.codex-trace-toggle');
+            const statusTextEl = aiRow.querySelector('.codex-status-text');
+            toggleBtn.addEventListener('click', () => {
+                traceEl.classList.toggle('collapsed');
+                statusTextEl.textContent = traceEl.classList.contains('collapsed')
+                    ? `${summaryText} ›`
+                    : `${summaryText} ⌄`;
+            });
+            messagesEl.appendChild(aiRow);
+        }
+
+        function renderActiveSession() {
+            const session = getActiveSession();
+            if (!session.messages || session.messages.length === 0) {
+                renderWelcome();
+            } else {
+                messagesEl.innerHTML = '';
+                session.messages.forEach(renderSavedMessage);
+                messagesEl.scrollTop = messagesEl.scrollHeight;
+            }
+        }
+
+        function startNewConversation() {
+            if (isStreaming) return;
+            const current = getActiveSession();
+            if (current.messages.length === 0) {
+                renderWelcome();
+                toggleDrawer(false);
+                return;
+            }
+            const fresh = createEmptySession();
+            sessions.unshift(fresh);
+            activeSessionId = fresh.id;
+            saveSessions();
+            renderActiveSession();
+            toggleDrawer(false);
+        }
+
         async function loadSuggestions() {
             try {
                 const res = await fetch(`${baseUrl}/ai/suggestions`, {
@@ -286,30 +517,31 @@
                     ? ['目前全库设备总数、待审批和逾期情况如何？', '帮我列出当前所有待审批的借用申请']
                     : ['现在有哪些相机或镜头可以借用？', '帮我查一下我当前的借用申请和审批状态'];
             }
-            if (history.length === 0) {
-                renderWelcome();
-            }
+            renderActiveSession();
         }
 
         async function sendQuestion(text) {
             const question = (text || inputEl.value || '').trim();
             if (!question || isStreaming) return;
 
-            if (history.length === 0) {
+            const session = getActiveSession();
+            if (session.messages.length === 0) {
                 messagesEl.innerHTML = '';
+                session.title = question.length > 22 ? question.slice(0, 22) + '...' : question;
             }
+            session.updatedAt = Date.now();
+            const historySnapshot = session.messages.slice(-8).map(m => ({ role: m.role, content: m.content }));
+
             inputEl.value = '';
             inputEl.style.height = 'auto';
             isStreaming = true;
             sendBtn.disabled = true;
 
-            // 1. 渲染用户气泡
             const userRow = document.createElement('div');
             userRow.className = 'ai-msg-row user';
             userRow.innerHTML = `<div class="ai-user-bubble">${escapeHtml(question)}</div>`;
             messagesEl.appendChild(userRow);
 
-            // 2. 渲染 AI 回复容器（含 Codex 风格思考轨迹 + 回答正文）
             const aiRow = document.createElement('div');
             aiRow.className = 'ai-msg-row assistant';
             aiRow.innerHTML = `
@@ -345,10 +577,12 @@
             });
 
             const stepMap = new Map();
+            const stepDataMap = new Map();
             const startedAt = Date.now();
             let fullAnswer = '';
 
             const upsertStep = (step) => {
+                stepDataMap.set(step.id, step);
                 let row = stepMap.get(step.id);
                 if (!row) {
                     row = document.createElement('div');
@@ -374,7 +608,7 @@
                         'Content-Type': 'application/json',
                         'Authorization': `Bearer ${token}`
                     },
-                    body: JSON.stringify({ message: question, history: history.slice(-8) })
+                    body: JSON.stringify({ message: question, history: historySnapshot })
                 });
 
                 if (!resp.ok) {
@@ -419,14 +653,10 @@
                     }
                 }
 
-                // 流式输出完成后移除尾部渐变遮罩，恢复清晰显示
                 answerEl.innerHTML = renderMarkdown(fullAnswer);
-                history.push({ role: 'user', content: question });
-                if (fullAnswer) {
-                    history.push({ role: 'assistant', content: fullAnswer });
-                }
             } catch (err) {
-                answerEl.innerHTML = renderMarkdown(`请求智能体失败：${err.message}`);
+                fullAnswer = `请求智能体失败：${err.message}`;
+                answerEl.innerHTML = renderMarkdown(fullAnswer);
             } finally {
                 isStreaming = false;
                 sendBtn.disabled = !inputEl.value.trim();
@@ -439,6 +669,17 @@
                     summaryBaseText = `已思考 · ${stepMap.size} 个步骤 (${elapsedSec}s)`;
                     statusTextEl.textContent = `${summaryBaseText} ›`;
                 }
+
+                // 持久化当前会话消息与步骤
+                session.messages.push({ role: 'user', content: question });
+                session.messages.push({
+                    role: 'assistant',
+                    content: fullAnswer,
+                    steps: Array.from(stepDataMap.values()),
+                    elapsedSec
+                });
+                session.updatedAt = Date.now();
+                saveSessions();
                 messagesEl.scrollTop = messagesEl.scrollHeight;
             }
         }
@@ -452,16 +693,27 @@
         panel.querySelector('#aiCloseBtn').addEventListener('click', () => {
             panel.classList.remove('open');
             fab.style.display = 'flex';
+            toggleDrawer(false);
         });
 
         panel.querySelector('#aiExpandBtn').addEventListener('click', () => {
             panel.classList.toggle('expanded');
         });
 
-        panel.querySelector('#aiNewChatBtn').addEventListener('click', () => {
+        panel.querySelector('#aiMenuBtn').addEventListener('click', () => toggleDrawer(true));
+        panel.querySelector('#aiDrawerCloseBtn').addEventListener('click', () => toggleDrawer(false));
+        backdropEl.addEventListener('click', () => toggleDrawer(false));
+
+        panel.querySelector('#aiNewChatBtn').addEventListener('click', startNewConversation);
+        panel.querySelector('#aiDrawerNewBtn').addEventListener('click', startNewConversation);
+
+        panel.querySelector('#aiClearHistoryBtn').addEventListener('click', () => {
             if (isStreaming) return;
-            history.length = 0;
-            renderWelcome();
+            sessions = [createEmptySession()];
+            activeSessionId = sessions[0].id;
+            saveSessions();
+            renderDrawerList();
+            renderActiveSession();
         });
 
         sendBtn.addEventListener('click', () => sendQuestion());
