@@ -51,8 +51,15 @@ public class SecurityConfig {
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 // 配置请求授权
                 .authorizeHttpRequests(auth -> auth
-                        // 允许登录接口匿名访问
-                        .requestMatchers("/auth/login").permitAll()
+                        // 允许登录接口、SpringDoc OpenAPI 文档与健康检查端点匿名访问
+                        .requestMatchers(
+                                "/auth/login",
+                                "/v3/api-docs/**",
+                                "/swagger-ui/**",
+                                "/swagger-ui.html",
+                                "/actuator/health",
+                                "/actuator/info"
+                        ).permitAll()
                         // 用户端接口：已认证用户（USER、ADMIN、ROOT）都可以访问
                         .requestMatchers("/categories", "/devices", "/borrow/**", "/user/**").authenticated()
                         // 管理员接口需要ADMIN或ROOT角色

@@ -8,22 +8,28 @@ import chat.hbcit.devicemanagebackend.mapper.DeviceMapper;
 import chat.hbcit.devicemanagebackend.service.CategoryService;
 import chat.hbcit.devicemanagebackend.constants.ResponseCode;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.Duration;
 import java.util.List;
 
 /**
- * 设备分类服务实现类
+ * 设备分类服务实现类（集成 Redis 缓存与降级回源策略）
  *
  * @author DeviceManage
  */
 @Service
 public class CategoryServiceImpl implements CategoryService {
     private static final Logger logger = LoggerFactory.getLogger(CategoryServiceImpl.class);
+    static final String CATEGORIES_CACHE_KEY = "device_manage:categories:all";
+    private static final Duration CACHE_TTL = Duration.ofMinutes(30);
 
     @Autowired
     private CategoryMapper categoryMapper;
@@ -31,9 +37,54 @@ public class CategoryServiceImpl implements CategoryService {
     @Autowired
     private DeviceMapper deviceMapper;
 
+    @Autowired(required = false)
+    private StringRedisTemplate stringRedisTemplate;
+
+    @Autowired(required = false)
+    private ObjectMapper objectMapper;
+
     @Override
     public List<Category> getAllCategories() {
-        return categoryMapper.selectList(null);
+        if (stringRedisTemplate != null && objectMapper != null) {
+            try {
+                String cachedJson = stringRedisTemplate.opsForValue().get(CATEGORIES_CACHE_KEY);
+                if (cachedJson != null && !cachedJson.isBlank()) {
+                    logger.debug("命中设备分类 Redis 缓存");
+                    return objectMapper.readValue(cachedJson, new TypeReference<List<Category>>() {});
+                }
+            } catch (Exception ex) {
+                // Redis 异常时自动降级查询 MySQL，保证主链路可用
+                logger.warn("读取分类 Redis 缓存失败，已降级回源 MySQL: {}", ex.getMessage());
+            }
+        }
+
+        List<Category> categories = categoryMapper.selectList(null);
+        cacheCategoriesQuietly(categories);
+        return categories;
+    }
+
+    private void cacheCategoriesQuietly(List<Category> categories) {
+        if (stringRedisTemplate == null || objectMapper == null) {
+            return;
+        }
+        try {
+            String json = objectMapper.writeValueAsString(categories);
+            stringRedisTemplate.opsForValue().set(CATEGORIES_CACHE_KEY, json, CACHE_TTL);
+        } catch (Exception ex) {
+            logger.warn("写入分类 Redis 缓存失败（已忽略，不影响主流程）: {}", ex.getMessage());
+        }
+    }
+
+    private void evictCategoryCacheQuietly() {
+        if (stringRedisTemplate == null) {
+            return;
+        }
+        try {
+            stringRedisTemplate.delete(CATEGORIES_CACHE_KEY);
+            logger.debug("已清除设备分类 Redis 缓存");
+        } catch (Exception ex) {
+            logger.warn("清除分类 Redis 缓存失败（已忽略）: {}", ex.getMessage());
+        }
     }
 
     @Override
@@ -63,6 +114,7 @@ public class CategoryServiceImpl implements CategoryService {
         }
 
         categoryMapper.insert(category);
+        evictCategoryCacheQuietly();
         logger.info("创建分类成功，分类ID：{}，分类名称：{}", category.getId(), category.getName());
         return category;
     }
@@ -116,6 +168,7 @@ public class CategoryServiceImpl implements CategoryService {
         }
 
         categoryMapper.updateById(existCategory);
+        evictCategoryCacheQuietly();
         logger.info("更新分类成功，分类ID：{}", id);
     }
 
@@ -133,6 +186,7 @@ public class CategoryServiceImpl implements CategoryService {
         }
 
         categoryMapper.deleteById(id);
+        evictCategoryCacheQuietly();
         logger.info("删除分类成功，分类ID：{}，分类名称：{}", id, category.getName());
     }
 }

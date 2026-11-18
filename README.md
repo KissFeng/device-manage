@@ -279,3 +279,48 @@ python3 -m http.server 8000
 ## 📄 开源协议
 
 本项目采用 [MIT License](LICENSE) 授权许可。
+
+---
+
+## 📋 综合实训构建与复核说明
+
+### 1. 运行环境与依赖
+- **JDK**：17+
+- **数据库**：MySQL 8.0+（初始化脚本：`docs/device_manage.sql`）
+- **缓存中间件**：Redis（`localhost:6379`，不可用时自动降级回源 MySQL）
+- **构建工具**：Maven 3.9+
+
+### 2. 配置与启动
+1. 创建数据库 `device_manage` 并导入 `docs/device_manage.sql`。
+2. 参考 `DeviceManage-backend/src/main/resources/application-example.properties`，通过环境变量或修改 `application.properties` 配置数据库连接与 `JWT_SECRET`。
+3. 启动后端服务：
+   ```bash
+   cd DeviceManage-backend
+   mvn spring-boot:run
+   ```
+4. 启动前端静态页面：
+   ```bash
+   cd DeviceManage-frontend
+   python3 -m http.server 8000
+   ```
+
+### 3. 关键访问地址与测试账号
+- **前端界面**：`http://localhost:8000`
+- **Swagger UI（OpenAPI 3）**：`http://localhost:9011/swagger-ui.html`
+- **OpenAPI JSON**：`http://localhost:9011/v3/api-docs`
+- **Actuator 健康检查**：`http://localhost:9011/actuator/health`
+- **测试账号**（`users` 表预置）：`root`（ROOT）、`admin`（ADMIN）、`赵杰` / `user1`（USER）
+
+### 4. 自动化测试与覆盖率验证
+```bash
+cd DeviceManage-backend
+mvn clean test
+```
+- 测试报告输出至：`DeviceManage-backend/target/surefire-reports/`
+- JaCoCo 覆盖率报告输出至：`DeviceManage-backend/target/site/jacoco/index.html`
+
+### 5. 关键架构决策记录（ADR）
+1. **设备模板与物理实例分离建模**：将 `devices`（型号/规格）与 `device_instances`（具体序列号物理台套）拆分，解决同一型号多台设备并发借用与单台维保状态追踪问题；代价是查询设备列表需聚合实例状态。
+2. **无状态认证 + 角色权限矩阵**：采用 Spring Security + JWT 替代服务端 Session，前后端分离跨域友好；通过 `SecurityConfig` 明确划分匿名（`/auth/login`、Swagger、Actuator）、普通用户与管理员（`/admin/**`）权限边界。
+3. **Redis 缓存 + 异常降级回源 + 定时巡检**：对高频读取的设备分类接入 Redis 缓存并在增删改时主动失效，同时在异常时自动降级查询 MySQL 保证高可用；引入 `@Scheduled` 定时扫描逾期未还设备并同步监控摘要，避免人工漏审。
+

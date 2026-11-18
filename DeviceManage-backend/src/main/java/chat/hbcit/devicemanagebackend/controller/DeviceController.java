@@ -7,6 +7,8 @@ import chat.hbcit.devicemanagebackend.enums.DeviceStatus;
 import chat.hbcit.devicemanagebackend.service.DeviceService;
 import chat.hbcit.devicemanagebackend.service.impl.DeviceServiceImpl;
 import chat.hbcit.devicemanagebackend.vo.DeviceVO;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.*;
 
@@ -18,6 +20,7 @@ import java.util.List;
  *
  * @author DeviceManage
  */
+@Tag(name = "用户端-设备浏览", description = "查询可用媒体设备分页列表与详情")
 @RestController
 @RequestMapping("/devices")
 public class DeviceController {
@@ -36,6 +39,7 @@ public class DeviceController {
      * @param size       每页数量
      * @return 分页结果
      */
+    @Operation(summary = "分页查询可借用设备列表", description = "支持按设备名称模糊搜索与分类筛选，仅展示正常状态设备")
     @GetMapping
     public Result<PageResult<DeviceVO>> getDeviceList(@RequestParam(required = false) String name,
                                                        @RequestParam(required = false) Long categoryId,
