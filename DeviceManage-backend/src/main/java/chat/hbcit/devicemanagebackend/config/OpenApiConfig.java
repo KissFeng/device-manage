@@ -44,7 +44,7 @@ public class OpenApiConfig {
     public GroupedOpenApi userPortalApi() {
         return GroupedOpenApi.builder()
                 .group("01-用户端与认证接口")
-                .pathsToMatch("/auth/**", "/categories/**", "/devices/**", "/borrow/**", "/user/**")
+                .pathsToMatch("/auth/**", "/categories/**", "/devices/**", "/borrow/**", "/user/**", "/ai/**")
                 .build();
     }
 

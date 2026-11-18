@@ -1,6 +1,7 @@
 package chat.hbcit.devicemanagebackend.config;
 
 import chat.hbcit.devicemanagebackend.filter.JwtAuthenticationFilter;
+import jakarta.servlet.DispatcherType;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -51,6 +52,8 @@ public class SecurityConfig {
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 // 配置请求授权
                 .authorizeHttpRequests(auth -> auth
+                        // 放行 SseEmitter 等异步响应的二次 ASYNC 分发
+                        .dispatcherTypeMatchers(DispatcherType.ASYNC).permitAll()
                         // 允许登录接口、SpringDoc OpenAPI 文档与健康检查端点匿名访问
                         .requestMatchers(
                                 "/auth/login",
@@ -61,7 +64,7 @@ public class SecurityConfig {
                                 "/actuator/info"
                         ).permitAll()
                         // 用户端接口：已认证用户（USER、ADMIN、ROOT）都可以访问
-                        .requestMatchers("/categories", "/devices", "/borrow/**", "/user/**").authenticated()
+                        .requestMatchers("/categories", "/devices", "/borrow/**", "/user/**", "/ai/**").authenticated()
                         // 管理员接口需要ADMIN或ROOT角色
                         .requestMatchers("/admin/**").hasAnyRole("ADMIN", "ROOT")
                         // 其他接口需要认证

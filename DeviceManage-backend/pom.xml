@@ -32,7 +32,20 @@
         <jwt.version>0.12.3</jwt.version>
         <springdoc.version>2.8.5</springdoc.version>
         <jacoco.version>0.8.12</jacoco.version>
+        <spring-ai.version>1.0.0</spring-ai.version>
     </properties>
+
+    <dependencyManagement>
+        <dependencies>
+            <dependency>
+                <groupId>org.springframework.ai</groupId>
+                <artifactId>spring-ai-bom</artifactId>
+                <version>${spring-ai.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+        </dependencies>
+    </dependencyManagement>
     <dependencies>
         <!-- Spring Boot Web -->
         <dependency>
@@ -109,6 +122,12 @@
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-data-redis</artifactId>
+        </dependency>
+
+        <!-- Spring AI OpenAI Starter (兼容 DeepSeek 官方 API) -->
+        <dependency>
+            <groupId>org.springframework.ai</groupId>
+            <artifactId>spring-ai-starter-model-openai</artifactId>
         </dependency>
 
         <!-- SpringDoc OpenAPI 3 & Swagger UI -->
