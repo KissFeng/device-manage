@@ -665,6 +665,7 @@
     border-radius: 16px;
     padding: 10px 12px 8px 14px;
     background: #f8fafc;
+    cursor: text;
     transition: border-color 0.15s, background-color 0.15s, box-shadow 0.15s;
 }
 

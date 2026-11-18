@@ -716,6 +716,13 @@
             renderActiveSession();
         });
 
+        const inputBoxEl = panel.querySelector('.ai-input-box');
+        inputBoxEl.addEventListener('click', (e) => {
+            if (!e.target.closest('#aiSendBtn')) {
+                inputEl.focus();
+            }
+        });
+
         sendBtn.addEventListener('click', () => sendQuestion());
         inputEl.addEventListener('keydown', (e) => {
             if (e.key === 'Enter' && !e.shiftKey) {
